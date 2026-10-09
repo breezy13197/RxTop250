@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rx Flashcards</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Nunito:wght@400;600;700;800&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=Courier+Prime:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&display=swap">
+<style>
+body{margin:0;-webkit-font-smoothing:antialiased}
+*{box-sizing:border-box}
+a{color:#6741D9}a:hover{color:#4C2BB0}
+input::placeholder{color:#8A8296}
+button{-webkit-tap-highlight-color:transparent}
+.flipper{display:grid;transform-style:preserve-3d;transition:transform .55s cubic-bezier(.2,.75,.25,1);cursor:pointer}
+.face{grid-area:1/1;backface-visibility:hidden;-webkit-backface-visibility:hidden}
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+/* =====================================================================
+   1. DATA — body-system colors and the drug cards.
+   To add a drug, copy one { ... } block in DRUGS and edit its fields.
+   ===================================================================== */
+const SYS = {
+  endo:  { label: 'Endocrine',      color: '#C2255C', soft: '#FDE7EF' },
+  cardio:{ label: 'Cardiovascular', color: '#C2410C', soft: '#FDEBDD' },
+  resp:  { label: 'Respiratory',    color: '#0B7285', soft: '#DDF2F5' },
+  gi:    { label: 'GI',             color: '#9A5B00', soft: '#FBEFD6' },
+  cns:   { label: 'CNS',            color: '#6741D9', soft: '#ECE6FD' },
+  inf:   { label: 'Anti-infective', color: '#237032', soft: '#E2F2E5' },
+  heme:  { label: 'Hematologic',    color: '#1864AB', soft: '#E0ECF8' },
+};
+
+const DRUGS = [
+  { id:'levo', generic:'Levothyroxine Sodium', brand:'Synthroid®, Levoxyl®', cls:'Hormone / Thyroid', sys:'endo', route:'Oral', ind:['Hypothyroidism','TSH suppression (thyroid cancer/goiter)'], ctrl:'Not Controlled', cpl:'CPL1',
+    moa:'Synthetic T4. Converted to T3 in peripheral tissues; binds nuclear thyroid receptors to regulate gene transcription and metabolism.',
+    forms:'Tablets 25–300 mcg (color-coded by strength); capsules; IV.', boxed:'Not for treatment of obesity or for weight loss. Larger doses may cause serious or life-threatening toxicity.',
+    mon:'TSH (6–8 wk after dose change), free T4, heart rate, signs of over-replacement.', coun:'Take on an empty stomach 30–60 min before breakfast. Separate from iron, calcium, and antacids by 4 h. Full effect may take several weeks; usually lifelong.' },
+  { id:'metf', generic:'Metformin Hydrochloride', brand:'Glucophage® (XR)', cls:'Antidiabetic', sys:'endo', route:'Oral', ind:['Type 2 diabetes mellitus'], ctrl:'Not Controlled', cpl:'CPL1',
+    moa:'Decreases hepatic glucose production, decreases intestinal glucose absorption, and improves insulin sensitivity.',
+    forms:'IR tablets 500/850/1000 mg; ER tablets 500/750/1000 mg; oral solution.', boxed:'Lactic acidosis. Risk factors include renal impairment, age ≥65, iodinated contrast, hypoxic states, excess alcohol, hepatic impairment.',
+    mon:'eGFR before starting and at least yearly; A1C; fasting glucose; vitamin B12.', coun:'Take with meals. Swallow ER whole. GI upset is common and improves. Limit alcohol. Tell providers before contrast imaging or surgery.' },
+  { id:'mont', generic:'Montelukast Sodium', brand:'Singulair®', cls:'Antiasthmatic / Antiallergy', sys:'resp', route:'Oral', ind:['Asthma','Allergic rhinitis'], ctrl:'Not Controlled', cpl:'CPL1',
+    moa:'Selective CysLT1 receptor antagonist; blocks leukotriene D4–mediated bronchoconstriction, edema, and inflammation.',
+    forms:'Tablets 10 mg; chewable tablets 4, 5 mg; oral granules 4 mg.', boxed:'Serious neuropsychiatric events, including suicidal thoughts and behavior.',
+    mon:'Mood, behavior, and sleep changes; asthma control.', coun:'Take daily, usually in the evening, even when well. Not for acute attacks; keep a rescue inhaler. Report mood or behavior changes. Chewables contain phenylalanine.' },
+  { id:'omep', generic:'Omeprazole', brand:'Prilosec®', cls:'Gastric Antisecretory', sys:'gi', route:'Oral', ind:['GERD / erosive esophagitis','H. pylori eradication (combination)'], ctrl:'Not Controlled', cpl:'CPL2',
+    moa:'Proton pump inhibitor. Irreversibly blocks H+/K+-ATPase in gastric parietal cells.',
+    forms:'DR capsules 10/20/40 mg; DR suspension packets; OTC 20 mg tablets.', boxed:'',
+    mon:'Symptom relief; magnesium and vitamin B12 with long-term use.', coun:'Take 30–60 min before a meal. Swallow whole, or open capsule onto applesauce. OTC course is 14 days unless directed.' },
+  { id:'amph', generic:'Amphetamine / Dextroamphetamine', brand:'Adderall®, Adderall XR®', cls:'CNS Agent for ADHD', sys:'cns', route:'Oral', ind:['ADHD','Narcolepsy'], ctrl:'Schedule II', cpl:'CPL2',
+    moa:'Promotes release and blocks reuptake of norepinephrine and dopamine in the CNS.',
+    forms:'IR tablets 5–30 mg; ER capsules 5–30 mg.', boxed:'Abuse, misuse, and addiction. Assess risk before prescribing and monitor throughout therapy.',
+    mon:'Blood pressure, heart rate, growth in children, sleep, signs of misuse.', coun:'Take in the morning to avoid insomnia. ER capsules may be sprinkled on applesauce. Store securely; never share.' },
+  { id:'lisi', generic:'Lisinopril', brand:'Prinivil®, Zestril®', cls:'Antihypertensive', sys:'cardio', route:'Oral', ind:['Hypertension','Heart failure; acute MI'], ctrl:'Not Controlled', cpl:'CPL3',
+    moa:'ACE inhibitor. Blocks conversion of angiotensin I to angiotensin II, causing vasodilation and reduced aldosterone.',
+    forms:'Tablets 2.5–40 mg; oral solution 1 mg/mL.', boxed:'Fetal toxicity. Discontinue as soon as pregnancy is detected.',
+    mon:'Blood pressure, serum potassium, SCr/BUN.', coun:'A dry cough may occur. Rise slowly. Seek care for swelling of face, lips, or tongue. Avoid potassium supplements and salt substitutes unless directed.' },
+  { id:'ator', generic:'Atorvastatin Calcium', brand:'Lipitor®', cls:'Antihyperlipidemic', sys:'cardio', route:'Oral', ind:['Hyperlipidemia','Reduce risk of MI and stroke'], ctrl:'Not Controlled', cpl:'CPL3',
+    moa:'HMG-CoA reductase inhibitor. Lowers hepatic cholesterol synthesis and upregulates LDL receptors.',
+    forms:'Tablets 10/20/40/80 mg.', boxed:'',
+    mon:'Lipid panel 4–12 wk after start; baseline LFTs; muscle symptoms (CK if symptomatic).', coun:'May take any time of day. Report unexplained muscle pain or weakness. Avoid large amounts of grapefruit juice.' },
+  { id:'warf', generic:'Warfarin Sodium', brand:'Coumadin®, Jantoven®', cls:'Anticoagulant', sys:'heme', route:'Oral', ind:['VTE prophylaxis and treatment','Thromboembolism with AF or valve replacement'], ctrl:'Not Controlled', cpl:'CPL3',
+    moa:'Inhibits vitamin K epoxide reductase (VKORC1), reducing synthesis of clotting factors II, VII, IX, X and proteins C and S.',
+    forms:'Tablets 1–10 mg (color-coded by strength).', boxed:'Bleeding risk. May cause major or fatal bleeding; monitor INR regularly.',
+    mon:'INR (usual goal 2–3), CBC, signs of bleeding.', coun:'Keep vitamin K intake consistent. Take at the same time daily. Check before starting any new medicine or supplement. Report bleeding or dark stools.' },
+  { id:'sert', generic:'Sertraline Hydrochloride', brand:'Zoloft®', cls:'Antidepressant', sys:'cns', route:'Oral', ind:['Major depressive disorder','OCD, panic disorder, PTSD, SAD, PMDD'], ctrl:'Not Controlled', cpl:'CPL4',
+    moa:'Selective serotonin reuptake inhibitor (SSRI).',
+    forms:'Tablets 25/50/100 mg; oral concentrate 20 mg/mL.', boxed:'Suicidal thoughts and behaviors in pediatric and young adult patients.',
+    mon:'Mood and suicidality (especially early and after dose changes); sodium in older adults; serotonin syndrome.', coun:'Full effect takes 4–6 weeks. Do not stop abruptly. Dilute the oral concentrate before use. Do not combine with MAOIs.' },
+  { id:'oxyc', generic:'Oxycodone Hydrochloride', brand:'Roxicodone®, OxyContin®', cls:'Opioid Analgesic', sys:'cns', route:'Oral', ind:['Pain severe enough to require an opioid'], ctrl:'Schedule II', cpl:'CPL4',
+    moa:'Full mu-opioid receptor agonist.',
+    forms:'IR tablets 5–30 mg; ER tablets 10–80 mg; oral solution.', boxed:'Addiction, abuse, and misuse; life-threatening respiratory depression; accidental ingestion; neonatal opioid withdrawal; CYP3A4 interactions; risk with benzodiazepines.',
+    mon:'Pain relief, respiratory rate and sedation, bowel function, signs of misuse; check PDMP.', coun:'Swallow ER tablets whole. Avoid alcohol and other sedatives. Prevent constipation. Store locked and dispose of safely. Keep naloxone available.' },
+  { id:'alpr', generic:'Alprazolam', brand:'Xanax®, Xanax XR®', cls:'Antianxiety Agent', sys:'cns', route:'Oral', ind:['Generalized anxiety disorder','Panic disorder'], ctrl:'Schedule IV', cpl:'CPL4',
+    moa:'Benzodiazepine. Enhances GABA activity at the GABA-A receptor.',
+    forms:'Tablets 0.25–2 mg; ER tablets 0.5–3 mg; ODT.', boxed:'Risks with concomitant opioid use; abuse, misuse, and addiction; dependence and withdrawal reactions.',
+    mon:'Sedation, respiratory status, signs of misuse, withdrawal during taper.', coun:'Do not stop abruptly. Avoid alcohol. May cause drowsiness; use caution driving.' },
+  { id:'amox', generic:'Amoxicillin', brand:'Amoxil®', cls:'Antibiotic', sys:'inf', route:'Oral', ind:['ENT, GU, skin, and lower respiratory infections','H. pylori eradication (combination)'], ctrl:'Not Controlled', cpl:'CPL4',
+    moa:'Aminopenicillin. Binds penicillin-binding proteins and inhibits bacterial cell wall synthesis.',
+    forms:'Capsules 250/500 mg; tablets 500/875 mg; chewables; oral suspension.', boxed:'',
+    mon:'Resolution of infection, rash or allergic reaction, severe diarrhea (C. difficile).', coun:'Finish the full course. Refrigerate suspension (preferred) and discard after 14 days. Report rash, hives, or severe diarrhea.' },
+  { id:'enox', generic:'Enoxaparin Sodium', brand:'Lovenox®', cls:'Anticoagulant', sys:'heme', route:'Injectable', ind:['VTE prophylaxis','VTE treatment'], ctrl:'Not Controlled', cpl:'CPL3',
+    moa:'Low-molecular-weight heparin. Binds antithrombin and preferentially inactivates factor Xa.',
+    forms:'Prefilled syringes 30–150 mg; multiple-dose vial 300 mg/3 mL.', boxed:'Spinal/epidural hematomas with neuraxial anesthesia or spinal puncture.',
+    mon:'CBC and platelets, SCr (renal dosing), anti-Xa in select patients, bleeding.', coun:'Inject under the skin of the abdomen and rotate sites. Do not expel the air bubble or rub the site. Report unusual bleeding or bruising.' },
+  { id:'vanc', generic:'Vancomycin', brand:'Vancocin®', cls:'Antibiotic', sys:'inf', route:'Injectable', ind:['Serious gram-positive infections incl. MRSA','C. difficile diarrhea (oral)'], ctrl:'Not Controlled', cpl:'CPL4',
+    moa:'Glycopeptide. Binds D-Ala-D-Ala precursors and inhibits cell wall synthesis.',
+    forms:'Vials 500 mg–10 g for injection; premixed IV bags; oral capsules.', boxed:'',
+    mon:'AUC or trough levels, SCr, CBC, hearing.', coun:'Infuse over at least 60 min to prevent infusion reaction (flushing). Report hearing changes or ringing in the ears.' },
+  { id:'nalo', generic:'Naloxone', brand:'Narcan®', cls:'Antidote', sys:'cns', route:'Injectable', ind:['Opioid overdose reversal','Postoperative opioid depression'], ctrl:'Not Controlled', cpl:'CPL4',
+    moa:'Competitive mu-opioid receptor antagonist.',
+    forms:'Injection 0.4 mg/mL; prefilled syringe; nasal spray 4 mg.', boxed:'',
+    mon:'Respiratory rate, level of consciousness, recurrent sedation, opioid withdrawal.', coun:'Call 911 after giving. May repeat every 2–3 min. Effect can wear off before the opioid does.' },
+];
+
+/* =====================================================================
+   2. VISUAL STYLE — colors, fonts and shapes (the "Sticker" look).
+   ===================================================================== */
+const T = {
+  page:'#FFF7EC', pageInk:'#2A2238', pageMuted:'#6B6178', ink:'#2A2238',
+  head:"'Fredoka', sans-serif", body:"'Nunito', sans-serif", label:"'Fredoka', sans-serif",
+  cardRadius:'26px', cardBorder:'3px solid #2A2238', cardShadow:'7px 7px 0 #2A2238',
+  panelBg:'#FFFFFF', panelBorder:'2.5px solid #2A2238', panelRadius:'20px', divider:'2px dashed #E3D9CC',
+  btnRadius:'14px', btnBorder:'2.5px solid #2A2238', btnBg:'#FFFFFF', btnFg:'#2A2238', btnShadow:'3px 3px 0 #2A2238',
+  primaryBg:'#2A2238', primaryFg:'#FFF7EC',
+  fieldPad:'12px 14px', fieldRadius:'14px', fieldRadiusLg:'18px',
+};
+const hash = s => { let h = 7; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h; };
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+
+/* =====================================================================
+   3. APP STATE — everything the screen depends on.
+   The "missed" list is remembered in this browser.
+   ===================================================================== */
+const store = {
+  get(k, fallback) { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? fallback : v; } catch (e) { return fallback; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} },
+};
+const savedMissed = store.get('rxcards-missed', []);
+const state = {
+  mode: 'flash',
+  front: 'Generic', route: 'All', cpl: [], sys: [], ctrlOnly: false, boxedOnly: false, missedOnly: false,
+  idx: 0, flipped: false, missed: Array.isArray(savedMissed) ? savedMissed : [], srQueue: null, search: '',
+  qn: 0, picked: null, score: 0, total: 0,
+};
+
+function setState(patch) {
+  Object.assign(state, typeof patch === 'function' ? patch(state) : patch);
+  render();
+}
+function deck() {
+  const s = state;
+  return DRUGS.filter(d =>
+    (s.route === 'All' || d.route === s.route) &&
+    (!s.cpl.length || s.cpl.includes(d.cpl)) &&
+    (!s.sys.length || s.sys.includes(d.sys)) &&
+    (!s.ctrlOnly || d.ctrl !== 'Not Controlled') &&
+    (!s.boxedOnly || !!d.boxed) &&
+    (!s.missedOnly || s.missed.includes(d.id)));
+}
+function resetPos(extra = {}) { setState({ idx: 0, flipped: false, srQueue: null, qn: 0, picked: null, ...extra }); }
+function step(n) { const len = deck().length || 1; setState({ idx: (state.idx + n + len) % len, flipped: false }); }
+function setMissed(id, isMissed) {
+  const set = new Set(state.missed); isMissed ? set.add(id) : set.delete(id);
+  state.missed = [...set];
+  store.set('rxcards-missed', state.missed);
+}
+function srGrade(grade, id) {
+  const pos = { again: 1, hard: 3 }[grade];
+  if (grade === 'again') setMissed(id, true);
+  if (grade === 'good' || grade === 'easy') setMissed(id, false);
+  const q = state.srQueue.slice(1);
+  if (pos != null) q.splice(Math.min(pos, q.length), 0, id);
+  setState({ srQueue: q, flipped: false });
+}
+/* Flipping only swaps the card's rotation, so the 3D animation plays smoothly. */
+function flip() {
+  state.flipped = !state.flipped;
+  const el = document.getElementById('flipper');
+  if (el) el.style.transform = state.flipped ? 'rotateY(180deg)' : 'rotateY(0deg)';
+}
+
+/* =====================================================================
+   4. CARD LOOK — colors and text for one drug in the current style.
+   ===================================================================== */
+function frontFor(d, idx) {
+  let f = state.front;
+  if (f === 'Random') f = ['Generic', 'Brand', 'Clues'][hash(d.id + idx) % 3];
+  if (f === 'Brand') return { label: 'Brand name — what is the generic?', text: d.brand, sub: '' };
+  if (f === 'Clues') return { label: 'Name the drug', text: d.cls, sub: d.ind.join(' · ') + ' · ' + d.route };
+  return { label: 'Generic — recall brand, class, and use', text: d.generic, sub: '' };
+}
+
+function view(d, t, idx) {
+  const sy = SYS[d.sys];
+  const fr = frontFor(d, idx);
+  const tags = [d.cls, d.cpl, d.ctrl === 'Not Controlled' ? 'Not controlled' : d.ctrl]
+    .map(l => ({ label: l, bg: '#FFFFFF', fg: '#2A2238' }));
+  if (d.ctrl !== 'Not Controlled') tags[2] = { label: d.ctrl, bg: '#111111', fg: '#FFFFFF' };
+  return {
+    d, color: sy.color, sysLabel: sy.label, routeLabel: d.route,
+    frontBg: sy.soft, frontFg: t.ink, frontMuted: t.pageMuted, promptLabelColor: sy.color,
+    backBg: '#FFFFFF',
+    pillBg: sy.color, pillFg: '#FFFFFF', pillBorder: '2px solid #2A2238',
+    bandBg: sy.color, bandFg: '#FFFFFF', bandBorder: '3px solid #2A2238', nameColor: '#FFFFFF',
+    tagBorder: '2px solid #2A2238',
+    tags,
+    fieldBg: sy.soft,
+    labelColor: sy.color,
+    fields: [
+      { label: 'FDA indications', text: d.ind.join('; ') },
+      { label: 'Mechanism', text: d.moa },
+      { label: 'Key monitoring', text: d.mon },
+      { label: 'Counseling', text: d.coun },
+      { label: 'Dosage forms', text: d.forms },
+    ],
+    frontLabel: fr.label, frontText: fr.text, frontSub: fr.sub,
+    frontSize: fr.text.length > 26 ? '38px' : '48px',
+  };
+}
+
+function quiz(dk, t) {
+  const s = state;
+  const d = dk[s.qn % dk.length];
+  const types = [
+    { q: 'Which drug class?', stem: d.generic, key: 'cls' },
+    { q: 'What is the generic name?', stem: d.brand, key: 'generic' },
+    { q: 'Primary FDA indication?', stem: d.generic, key: 'ind0' },
+  ];
+  if (d.boxed) types.push({ q: 'Which drug carries this boxed warning?', stem: d.boxed, key: 'generic' });
+  const ty = types[hash(d.id + s.qn) % types.length];
+  const val = x => ty.key === 'ind0' ? x.ind[0] : x[ty.key];
+  const correct = val(d);
+  const pool = [...new Set(DRUGS.map(val))].filter(v => v !== correct).sort((a, b) => hash(a + s.qn) - hash(b + s.qn)).slice(0, 3);
+  const opts = [correct, ...pool].sort((a, b) => hash(b + 'x' + s.qn) - hash(a + 'x' + s.qn));
+  const answered = s.picked != null;
+  const options = opts.map((o, i) => {
+    const isRight = o === correct, isPicked = s.picked === o;
+    let bg = t.btnBg, fg = t.btnFg, border = t.btnBorder, keyBg = SYS[d.sys].soft, keyFg = SYS[d.sys].color;
+    if (answered && isRight) { bg = '#237032'; fg = '#FFFFFF'; keyBg = '#FFFFFF'; keyFg = '#237032'; }
+    else if (answered && isPicked) { bg = '#B42318'; fg = '#FFFFFF'; keyBg = '#FFFFFF'; keyFg = '#B42318'; }
+    return { label: o, key: 'ABCD'[i], bg, fg, border, keyBg, keyFg,
+      onClick: () => { if (answered) return; setMissed(d.id, !isRight); setState({ picked: o, total: s.total + 1, score: s.score + (isRight ? 1 : 0) }); } };
+  });
+  return {
+    v: view(d, t, s.qn), question: ty.q, stem: ty.stem, stemSize: ty.stem.length > 60 ? '24px' : '38px',
+    options, answered, score: s.score, total: s.total,
+    feedback: !answered ? '' : s.picked === correct ? 'Correct.' : 'Answer: ' + correct,
+    next: () => setState({ qn: s.qn + 1, picked: null }),
+  };
+}
+
+/* =====================================================================
+   5. DRAWING THE SCREEN
+   Each button gets a numbered click handler (data-h="n").
+   ===================================================================== */
+let handlers = [];
+const on = fn => { handlers.push(fn); return 'data-h="' + (handlers.length - 1) + '"'; };
+
+function chipHtml(c, t, size = '6px 12px') {
+  const dot = c.dot ? `<span style="width:11px;height:11px;border-radius:50%;background:${c.dot};border:${c.dotBorder}"></span>` : '';
+  const layout = c.dot ? 'display:flex;align-items:center;gap:7px;padding:6px 12px 6px 9px;' : `padding:${size};`;
+  return `<button ${on(c.onClick)} style="${layout}font-family:${t.label};font-size:13px;font-weight:600;border-radius:999px;border:${c.border};background:${c.bg};color:${c.fg};cursor:pointer">${dot}${esc(c.label)}</button>`;
+}
+
+function render() {
+  handlers = [];
+  const s = state, t = T;
+  const dk = deck();
+  const chip = (active, onClick, label, extra = {}) => ({
+    label, onClick,
+    bg: active ? t.pageInk : 'transparent', fg: active ? t.page : t.pageInk,
+    border: '2px solid #2A2238',
+    ...extra,
+  });
+  const toggleIn = (key, v) => () => resetPos({ [key]: s[key].includes(v) ? s[key].filter(x => x !== v) : [...s[key], v] });
+  const lbl = (text, minW) => `<span style="font-family:${t.label};font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:${t.pageMuted}${minW ? ';min-width:44px' : ''}">${text}</span>`;
+
+  // Which card is showing?
+  let cur = null, position = '', statusLabel = '', srDone = false;
+  if (s.mode === 'flash' && dk.length) {
+    const i = s.idx % dk.length; cur = dk[i]; position = (i + 1) + ' of ' + dk.length;
+    statusLabel = position + (s.missed.length ? ' · ' + s.missed.length + ' missed' : '');
+  }
+  if (s.mode === 'sr' && dk.length) {
+    if (!s.srQueue) s.srQueue = dk.map(d => d.id);
+    const q = s.srQueue;
+    if (q.length) { cur = DRUGS.find(d => d.id === q[0]); position = 'Review'; statusLabel = q.length + ' due this session'; }
+    else srDone = true;
+  }
+
+  let gradeBtns = [];
+  if (cur && s.mode === 'flash') gradeBtns = [
+    { label: 'Missed it', sub: 'add to missed', bg: '#B42318', fg: '#FFFFFF', onClick: () => { setMissed(cur.id, true); step(1); } },
+    { label: 'Got it', sub: 'next card', bg: '#237032', fg: '#FFFFFF', onClick: () => { setMissed(cur.id, false); step(1); } },
+  ];
+  if (cur && s.mode === 'sr') gradeBtns = [
+    { label: 'Again', sub: '< 1 min', bg: '#B42318', fg: '#FFFFFF', onClick: () => srGrade('again', cur.id) },
+    { label: 'Hard', sub: '~6 min', bg: t.btnBg, fg: t.btnFg, onClick: () => srGrade('hard', cur.id) },
+    { label: 'Good', sub: '1 day', bg: '#237032', fg: '#FFFFFF', onClick: () => srGrade('good', cur.id) },
+    { label: 'Easy', sub: '4 days', bg: '#1864AB', fg: '#FFFFFF', onClick: () => srGrade('easy', cur.id) },
+  ];
+
+  const modes = [['flash', 'Flip & grade'], ['quiz', 'Quiz'], ['sr', 'Spaced review'], ['browse', 'Browse']];
+  const showFrontPicker = s.mode === 'flash' || s.mode === 'sr';
+
+  // ---------- Header, mode tabs, filter panel ----------
+  let html = `
+<div style="min-height:100vh;background:${t.page};color:${t.pageInk};font-family:${t.body};transition:background .3s">
+  <div style="max-width:1120px;margin:0 auto;padding:28px 24px 64px;display:flex;flex-direction:column;gap:20px">
+    <header style="display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:16px">
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <div style="font-family:${t.label};font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:${t.pageMuted}">Sigler's Top 250 · Oral &amp; Injectable</div>
+        <h1 style="margin:0;font-family:${t.head};font-size:40px;line-height:1.05;font-weight:700;letter-spacing:-.01em">Rx Flashcards</h1>
+      </div>
+    </header>
+
+    <nav style="display:flex;gap:8px;flex-wrap:wrap">
+      ${modes.map(([k, l]) => {
+        const active = s.mode === k;
+        return `<button ${on(() => setState({ mode: k, flipped: false, srQueue: null }))} style="font-family:${t.head};font-size:16px;font-weight:600;padding:10px 18px;border-radius:${t.btnRadius};border:${t.btnBorder};background:${active ? t.primaryBg : t.btnBg};color:${active ? t.primaryFg : t.btnFg};box-shadow:${active ? 'none' : t.btnShadow};cursor:pointer">${l}</button>`;
+      }).join('')}
+    </nav>
+
+    <section style="display:flex;flex-direction:column;gap:12px;padding:16px 18px;border-radius:${t.panelRadius};background:${t.panelBg};border:${t.panelBorder}">
+      <div style="display:flex;flex-wrap:wrap;gap:10px 22px;align-items:center">
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          ${lbl('Route', true)}
+          ${['All', 'Oral', 'Injectable'].map(r => chipHtml(chip(s.route === r, () => resetPos({ route: r }), r), t)).join('')}
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          ${lbl('CPL')}
+          ${['CPL1', 'CPL2', 'CPL3', 'CPL4', 'CPL5'].map(c => chipHtml(chip(s.cpl.includes(c), toggleIn('cpl', c), c.replace('CPL', '')), t, '6px 11px')).join('')}
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          ${chipHtml(chip(s.ctrlOnly, () => resetPos({ ctrlOnly: !s.ctrlOnly }), 'Controlled only'), t)}
+          ${chipHtml(chip(s.boxedOnly, () => resetPos({ boxedOnly: !s.boxedOnly }), 'Boxed warning'), t)}
+          ${chipHtml(chip(s.missedOnly, () => resetPos({ missedOnly: !s.missedOnly }), 'My missed (' + s.missed.length + ')'), t)}
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        ${lbl('Class', true)}
+        ${Object.entries(SYS).map(([k, sy]) => chipHtml(chip(s.sys.includes(k), toggleIn('sys', k), sy.label, { dot: sy.color, dotBorder: '1.5px solid #2A2238' }), t)).join('')}
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;border-top:${t.divider};padding-top:12px">
+        ${showFrontPicker ? `
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          ${lbl('Card front')}
+          ${['Generic', 'Brand', 'Clues', 'Random'].map(f => chipHtml(chip(s.front === f, () => setState({ front: f, flipped: false }), f), t)).join('')}
+        </div>` : ''}
+        <div style="display:flex;gap:12px;align-items:center;margin-left:auto">
+          <span style="font-family:${t.label};font-size:14px;font-weight:700">${dk.length + (dk.length === 1 ? ' card' : ' cards')}</span>
+          <button ${on(() => resetPos({ route: 'All', cpl: [], sys: [], ctrlOnly: false, boxedOnly: false, missedOnly: false }))} style="font-family:${t.label};font-size:13px;background:none;border:none;color:${t.pageMuted};text-decoration:underline;cursor:pointer;padding:0">Clear filters</button>
+        </div>
+      </div>
+    </section>`;
+
+  if (!dk.length) {
+    html += `<div style="padding:60px 20px;text-align:center;font-family:${t.head};font-size:22px;color:${t.pageMuted}">No cards match these filters.</div>`;
+  }
+
+  // ---------- Flashcard (Flip & grade, Spaced review) ----------
+  if (showFrontPicker && dk.length) {
+    html += `<div style="display:flex;flex-direction:column;gap:18px;align-items:stretch;max-width:780px;width:100%;margin:0 auto">`;
+    if (srDone) {
+      html += `
+      <div style="padding:60px 24px;text-align:center;display:flex;flex-direction:column;gap:14px;align-items:center;border-radius:${t.cardRadius};border:${t.cardBorder};background:${t.panelBg}">
+        <div style="font-family:${t.head};font-size:28px;font-weight:700">Review session complete</div>
+        <div style="font-size:16px;color:${t.pageMuted}">Every card in this deck was rated Good or Easy.</div>
+        <button ${on(() => setState({ srQueue: null, flipped: false }))} style="font-family:${t.head};font-size:16px;font-weight:600;padding:12px 20px;border-radius:${t.btnRadius};border:${t.btnBorder};background:${t.primaryBg};color:${t.primaryFg};box-shadow:${t.btnShadow};cursor:pointer">Start again</button>
+      </div>`;
+    }
+    if (cur) {
+      const v = view(cur, t, s.idx);
+      html += `
+      <div style="perspective:1800px">
+        <div id="flipper" class="flipper" ${on(flip)} style="transform:${s.flipped ? 'rotateY(180deg)' : 'rotateY(0deg)'}">
+          <div class="face" style="min-height:440px;display:flex;flex-direction:column;border-radius:${t.cardRadius};border:${t.cardBorder};box-shadow:${t.cardShadow};background:${v.frontBg};color:${v.frontFg};overflow:hidden">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:20px 24px 0;flex-wrap:wrap">
+              <span style="display:flex;align-items:center;gap:8px;font-family:${t.label};font-size:13px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:6px 12px;border-radius:999px;background:${v.pillBg};color:${v.pillFg};border:${v.pillBorder}">${esc(v.sysLabel)}</span>
+              <span style="font-family:${t.label};font-size:13px;font-weight:600;color:${v.frontMuted}">${esc(v.routeLabel)} · Card ${esc(position)}</span>
+            </div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:30px 32px;text-align:center">
+              <div style="font-family:${t.label};font-size:14px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:${v.promptLabelColor}">${esc(v.frontLabel)}</div>
+              <div style="font-family:${t.head};font-size:${v.frontSize};font-weight:700;line-height:1.1;text-wrap:balance;max-width:620px">${esc(v.frontText)}</div>
+              <div style="font-size:18px;line-height:1.45;max-width:560px;text-wrap:pretty;color:${v.frontMuted}">${esc(v.frontSub)}</div>
+            </div>
+            <div style="padding:0 24px 20px;text-align:center;font-family:${t.label};font-size:13px;color:${v.frontMuted}">Click or press Space to flip</div>
+          </div>
+
+          <div class="face" style="transform:rotateY(180deg);display:flex;flex-direction:column;border-radius:${t.cardRadius};border:${t.cardBorder};box-shadow:${t.cardShadow};background:${v.backBg};color:${t.ink};overflow:hidden">
+            <div style="display:flex;flex-direction:column;gap:8px;padding:22px 28px 20px;background:${v.bandBg};color:${v.bandFg};border-bottom:${v.bandBorder}">
+              <div style="font-family:${t.label};font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;opacity:.92">${esc(v.sysLabel)} · ${esc(v.routeLabel)}</div>
+              <h2 style="margin:0;font-family:${t.head};font-size:34px;line-height:1.05;font-weight:700;color:${v.nameColor}">${esc(cur.generic)}</h2>
+              <div style="font-size:17px;font-weight:600">${esc(cur.brand)}</div>
+              <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">
+                ${v.tags.map(tg => `<span style="font-family:${t.label};font-size:12px;font-weight:700;padding:5px 10px;border-radius:999px;background:${tg.bg};color:${tg.fg};border:${v.tagBorder}">${esc(tg.label)}</span>`).join('')}
+              </div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:12px;padding:20px 24px 24px">
+              ${cur.boxed ? `
+              <div style="border:2.5px solid #111;background:#FFFFFF;color:#111;padding:12px 16px;border-radius:4px;display:flex;flex-direction:column;gap:4px">
+                <div style="font-family:${t.label};font-size:12px;font-weight:800;letter-spacing:.1em;text-transform:uppercase">Boxed warning</div>
+                <div style="font-size:15px;line-height:1.45;font-weight:600">${esc(cur.boxed)}</div>
+              </div>` : ''}
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:10px">
+                ${v.fields.map(f => `
+                <div style="display:flex;flex-direction:column;gap:5px;padding:${t.fieldPad};border-radius:${t.fieldRadius};background:${v.fieldBg}">
+                  <div style="font-family:${t.label};font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:${v.labelColor}">${esc(f.label)}</div>
+                  <div style="font-size:15px;line-height:1.5;text-wrap:pretty;color:${t.ink}">${esc(f.text)}</div>
+                </div>`).join('')}
+              </div>
+              <div style="font-family:${t.label};font-size:12px;color:${t.pageMuted};padding-top:2px">Condensed from FDA labeling for study. Verify against current DailyMed before clinical use.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between">
+        <div style="display:flex;gap:8px;align-items:center">
+          ${s.mode === 'flash' ? `
+          <div style="display:flex;gap:8px;align-items:center">
+            ${[['←', -1, 'Previous card'], ['→', 1, 'Next card']].map(([ch, n, aria]) => `<button ${on(() => step(n))} aria-label="${aria}" style="font-family:${t.head};font-size:16px;font-weight:600;width:46px;height:46px;border-radius:${t.btnRadius};border:${t.btnBorder};background:${t.btnBg};color:${t.btnFg};box-shadow:${t.btnShadow};cursor:pointer">${ch}</button>`).join('')}
+          </div>` : ''}
+          <span style="font-family:${t.label};font-size:14px;font-weight:600;color:${t.pageMuted}">${esc(statusLabel)}</span>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          ${gradeBtns.map(g => `<button ${on(g.onClick)} style="display:flex;flex-direction:column;align-items:center;gap:1px;min-width:92px;font-family:${t.head};font-size:16px;font-weight:600;padding:10px 16px;border-radius:${t.btnRadius};border:${t.btnBorder};background:${g.bg};color:${g.fg};box-shadow:${t.btnShadow};cursor:pointer">${esc(g.label)}<span style="font-family:${t.label};font-size:11px;font-weight:600;opacity:.85">${esc(g.sub)}</span></button>`).join('')}
+        </div>
+      </div>`;
+    }
+    html += `</div>`;
+  }
+
+  // ---------- Quiz ----------
+  if (s.mode === 'quiz' && dk.length) {
+    const q = quiz(dk, t), v = q.v;
+    html += `
+    <div style="max-width:780px;width:100%;margin:0 auto;display:flex;flex-direction:column;gap:16px">
+      <div style="display:flex;flex-direction:column;border-radius:${t.cardRadius};border:${t.cardBorder};box-shadow:${t.cardShadow};background:${v.frontBg};color:${v.frontFg};overflow:hidden">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:20px 24px 0;flex-wrap:wrap">
+          <span style="font-family:${t.label};font-size:13px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:6px 12px;border-radius:999px;background:${v.pillBg};color:${v.pillFg};border:${v.pillBorder}">${esc(v.sysLabel)}</span>
+          <span style="font-family:${t.label};font-size:14px;font-weight:700">Score ${q.score} / ${q.total}</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:12px;padding:26px 28px 30px">
+          <div style="font-family:${t.label};font-size:14px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${v.promptLabelColor}">${esc(q.question)}</div>
+          <div style="font-family:${t.head};font-size:${q.stemSize};font-weight:700;line-height:1.2;text-wrap:pretty">${esc(q.stem)}</div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:10px">
+        ${q.options.map(o => `<button ${on(o.onClick)} style="display:flex;align-items:center;gap:12px;text-align:left;font-family:${t.body};font-size:17px;font-weight:600;line-height:1.35;padding:16px 18px;border-radius:${t.btnRadius};border:${o.border};background:${o.bg};color:${o.fg};box-shadow:${t.btnShadow};cursor:pointer"><span style="flex:none;display:grid;place-items:center;width:30px;height:30px;border-radius:50%;font-family:${t.label};font-size:14px;font-weight:800;background:${o.keyBg};color:${o.keyFg}">${o.key}</span><span>${esc(o.label)}</span></button>`).join('')}
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;min-height:48px">
+        <span style="font-family:${t.head};font-size:18px;font-weight:600">${esc(q.feedback)}</span>
+        ${q.answered ? `<button ${on(q.next)} style="font-family:${t.head};font-size:16px;font-weight:600;padding:12px 22px;border-radius:${t.btnRadius};border:${t.btnBorder};background:${t.primaryBg};color:${t.primaryFg};box-shadow:${t.btnShadow};cursor:pointer">Next question →</button>` : ''}
+      </div>
+    </div>`;
+  }
+
+  // ---------- Browse ----------
+  if (s.mode === 'browse' && dk.length) {
+    html += `
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <input id="search" value="${esc(s.search)}" placeholder="Search generic, brand, class, or indication" aria-label="Search drugs" style="width:100%;font-family:${t.body};font-size:17px;padding:14px 18px;border-radius:${t.btnRadius};border:${t.btnBorder};background:${t.btnBg};color:${t.btnFg};box-shadow:${t.btnShadow};outline:none">
+      <div id="browse-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,320px),1fr));gap:12px">${browseHtml(dk, t)}</div>
+    </div>`;
+  }
+
+  html += `</div></div>`;
+
+  const searchFocused = document.activeElement && document.activeElement.id === 'search';
+  document.getElementById('app').innerHTML = html;
+  if (searchFocused) { const el = document.getElementById('search'); el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
+}
+
+function browseHtml(dk, t) {
+  const s = state;
+  const q = s.search.trim().toLowerCase();
+  return dk.filter(d => !q || [d.generic, d.brand, d.cls, ...d.ind].join(' ').toLowerCase().includes(q)).map(d => {
+    const sy = SYS[d.sys];
+    const badge = (l, dark) => ({ label: l, bg: dark ? '#111111' : sy.soft, fg: dark ? '#FFFFFF' : sy.color });
+    const badges = [badge(d.cls), badge(d.route)];
+    if (d.ctrl !== 'Not Controlled') badges.push(badge(d.ctrl, true));
+    if (d.boxed) badges.push(badge('Boxed warning', true));
+    if (s.missed.includes(d.id)) badges.push({ label: 'Missed', bg: '#B42318', fg: '#FFFFFF' });
+    return `
+    <button ${on(() => setState({ mode: 'flash', idx: dk.indexOf(d), flipped: true }))} style="display:flex;flex-direction:column;gap:8px;text-align:left;padding:0;overflow:hidden;border-radius:${t.fieldRadiusLg};border:${t.cardBorder};background:#FFFFFF;color:${t.ink};box-shadow:${t.btnShadow};cursor:pointer;font-family:${t.body}">
+      <div style="height:8px;width:100%;background:${sy.color}"></div>
+      <div style="display:flex;flex-direction:column;gap:6px;padding:6px 16px 16px;width:100%">
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">
+          <span style="font-family:${t.head};font-size:19px;font-weight:700;line-height:1.15">${esc(d.generic)}</span>
+          <span style="flex:none;font-family:${t.label};font-size:12px;font-weight:700">${esc(d.cpl)}</span>
+        </div>
+        <div style="font-size:14px;opacity:.85">${esc(d.brand)}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          ${badges.map(b => `<span style="font-family:${t.label};font-size:11px;font-weight:700;padding:4px 8px;border-radius:999px;background:${b.bg};color:${b.fg}">${esc(b.label)}</span>`).join('')}
+        </div>
+      </div>
+    </button>`;
+  }).join('');
+}
+
+/* =====================================================================
+   6. EVENTS — clicks, typing in search, keyboard shortcuts.
+   ===================================================================== */
+const app = document.getElementById('app');
+app.addEventListener('click', e => {
+  const el = e.target.closest('[data-h]');
+  if (el && handlers[el.dataset.h]) handlers[el.dataset.h]();
+});
+app.addEventListener('input', e => {
+  if (e.target.id !== 'search') return;
+  state.search = e.target.value;
+  // Only redraw the results so the search box keeps its cursor.
+  document.getElementById('browse-grid').innerHTML = browseHtml(deck(), T);
+});
+window.addEventListener('keydown', e => {
+  if (e.target && /INPUT|TEXTAREA/.test(e.target.tagName)) return;
+  const { mode } = state;
+  if (mode !== 'flash' && mode !== 'sr') return;
+  if (e.code === 'Space') { e.preventDefault(); flip(); }
+  if (mode === 'flash' && e.key === 'ArrowRight') step(1);
+  if (mode === 'flash' && e.key === 'ArrowLeft') step(-1);
+});
+
+render();
+</script>
+</body>
+</html>

@@ -44,7 +44,7 @@ Until step 3 is done, the app shows the saved copy and a note saying the live sh
 | **Tier 3 · Safety & counseling** | Boxed warning, contraindications, adverse effects, patient counseling | Red |
 
 Students switch each tier on or off with the **Study** buttons at the top of the app. Any combination works, but at least one tier must stay on.
-- The back of each card shows only the tiers that are switched on, each under its own heading.
+- The back of each card shows only the tiers that are switched on. When more than one tier is on, tabs at the top of the card back switch between them, so the card stays short (on a computer, the keys 1, 2 and 3 do the same).
 - The **Quiz** only asks about the tiers that are switched on. For example, with only Tier 3 on, it asks about boxed warnings and adverse effects.
 - The generic and brand name always appear at the top of the card back, because they are the answer to the card.
 
@@ -96,7 +96,13 @@ Students need a web address to open the app. The free option is **GitHub Pages**
 
 ---
 
-## 7. Saved progress
+## 7. Card order and phone layout
+
+- Cards and quiz questions come in a **random order** that changes every time the app is opened. The **⇄ Shuffle** button (next to the card count) reshuffles at any time. **Browse** stays alphabetical.
+- On phones, the **Study settings & filters** panel starts folded up so the card is visible straight away; tap **Show** to open it. The grading buttons stay pinned to the bottom of the screen.
+- Long drug names shrink to fit instead of breaking in the middle of a word.
+
+## 8. Saved progress
 
 Each student's **missed cards**, **chosen tiers** and **card-front setting** are saved in their own browser, on that device only. Nothing is sent anywhere. Clearing browser data resets them.
 

@@ -14,7 +14,13 @@ input::placeholder{color:#8A8296}
 button{-webkit-tap-highlight-color:transparent}
 .flipper{display:grid;transform-style:preserve-3d;transition:transform .55s cubic-bezier(.2,.75,.25,1);cursor:pointer}
 .face{grid-area:1/1;backface-visibility:hidden;-webkit-backface-visibility:hidden}
-@media (max-width:560px){.wrap{padding:18px 14px 48px !important}.h1{font-size:32px !important}}
+@media (max-width:560px){.wrap{padding:18px 14px 48px !important}.h1{font-size:32px !important}
+  .front{min-height:300px !important}
+  /* Keep the grading buttons on screen while scrolling a long card back */
+  .gradebar{position:sticky;bottom:0;z-index:5;background:#FFF7EC;margin:0 -14px;padding:10px 14px calc(10px + env(safe-area-inset-bottom));border-top:2px dashed #E3D9CC;flex-wrap:nowrap !important;gap:8px !important}
+  .gradebar .gstatus,.gradebar .gsub{display:none}
+  .gradebar .gbtn{min-width:0 !important;padding:10px 12px !important;font-size:15px !important}
+  .gradebar .arrow{width:42px !important;height:42px !important}}
 </style>
 <!-- Backup copy of the drug data (used only if the Google Sheet can't be reached). -->
 <script src="data/drugs-backup.js"></script>
@@ -164,6 +170,12 @@ const T = {
   fieldPad:'12px 14px', fieldRadius:'14px', fieldRadiusLg:'18px',
 };
 const hash = s => { let h = 7; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h; };
+// Shrinks large text so its longest word fits on one line (never breaks a word in half).
+const fitSize = (text, maxPx, sidePx) => {
+  const longest = Math.max(1, ...String(text).split(/\s+/).map(w => w.length));
+  return `min(${maxPx}px, calc((100vw - ${sidePx}px) / ${(longest * 0.64).toFixed(2)}))`;
+};
+const newSeed = () => Math.random().toString(36).slice(2);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 
 /* =====================================================================
@@ -182,6 +194,9 @@ const state = {
   route: 'All', cpl: [], sys: [], ctrlOnly: false, boxedOnly: false, missedOnly: false,
   idx: 0, flipped: false, missed: store.get('rxcards-missed', []), srQueue: null, search: '',
   qn: 0, picked: null, score: 0, total: 0,
+  seed: newSeed(),   // card order is shuffled with this; the Shuffle button makes a new one
+  backTier: null,    // which tier tab is open on the back of the card
+  panelOpen: window.innerWidth >= 700,   // settings panel starts folded on phones
 };
 if (!Array.isArray(state.missed)) state.missed = [];
 
@@ -200,7 +215,8 @@ function deck() {
     (!s.sys.length || s.sys.includes(d.sys)) &&
     (!s.ctrlOnly || d.controlled) &&
     (!s.boxedOnly || !!d.boxed) &&
-    (!s.missedOnly || s.missed.includes(d.id)));
+    (!s.missedOnly || s.missed.includes(d.id)))
+    .sort((a, b) => hash(a.id + s.seed) - hash(b.id + s.seed));
 }
 function resetPos(extra = {}) { setState({ idx: 0, flipped: false, srQueue: null, qn: 0, picked: null, ...extra }); }
 function step(n) { const len = deck().length || 1; setState({ idx: (state.idx + n + len) % len, flipped: false }); }
@@ -346,7 +362,17 @@ function tierPicker() {
 
 function cardBack(d, sy) {
   const draft = (hasTier(2) || hasTier(3)) && !d.reviewed;
-  const sections = backSections(d);
+  const all = backSections(d);
+  // Show one tier at a time; tabs switch between the tiers that are turned on.
+  const openTier = all.some(x => x.tier === state.backTier) ? state.backTier : all[0].tier;
+  const sections = all.filter(x => x.tier === openTier);
+  const tabs = all.length < 2 ? '' : `
+      <div role="tablist" aria-label="Information tier" style="display:flex;gap:6px;flex-wrap:wrap">
+        ${all.map(x => {
+          const active = x.tier === openTier, t = TIERS[x.tier];
+          return `<button role="tab" aria-selected="${active}" ${on(() => setState({ backTier: x.tier }))} style="flex:1 1 auto;font-family:${T.label};font-size:14px;font-weight:600;padding:8px 12px;border-radius:12px;border:2px solid #2A2238;background:${active ? t.color : '#FFFFFF'};color:${active ? '#FFFFFF' : T.pageInk};box-shadow:${active ? 'none' : '2px 2px 0 #2A2238'};cursor:pointer">${t.name} <span style="font-weight:500;opacity:.9">· ${t.desc}</span></button>`;
+        }).join('')}
+      </div>`;
   const fieldBox = f => `
     <div style="display:flex;flex-direction:column;gap:5px;padding:${T.fieldPad};border-radius:${T.fieldRadius};background:${sy.soft}">
       <div style="font-family:${T.label};font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:${sy.color}">${esc(f.label)}</div>
@@ -356,7 +382,7 @@ function cardBack(d, sy) {
   <div class="face" style="transform:rotateY(180deg);display:flex;flex-direction:column;border-radius:${T.cardRadius};border:${T.cardBorder};box-shadow:${T.cardShadow};background:#FFFFFF;color:${T.ink};overflow:hidden">
     <div style="display:flex;flex-direction:column;gap:8px;padding:22px 28px 20px;background:${sy.color};color:#FFFFFF;border-bottom:3px solid #2A2238">
       <div style="font-family:${T.label};font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;opacity:.92">${esc(sy.label)}${d.route ? ' · ' + esc(d.route) : ''}</div>
-      <h2 style="margin:0;font-family:${T.head};font-size:34px;line-height:1.05;font-weight:700">${esc(d.generic)}</h2>
+      <h2 style="margin:0;font-family:${T.head};font-size:${fitSize(d.generic, 34, 100)};line-height:1.05;font-weight:700;overflow-wrap:normal;word-break:normal">${esc(d.generic)}</h2>
       ${d.brand ? `<div style="font-size:17px;font-weight:600">${esc(d.brand)}</div>` : ''}
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">
         ${d.cpl ? `<span style="font-family:${T.label};font-size:12px;font-weight:700;padding:5px 10px;border-radius:999px;background:#FFFFFF;color:#2A2238;border:2px solid #2A2238">${esc(d.cpl)}</span>` : ''}
@@ -365,9 +391,10 @@ function cardBack(d, sy) {
       </div>
     </div>
     <div style="display:flex;flex-direction:column;gap:18px;padding:20px 24px 24px">
+      ${tabs}
       ${sections.map(sec => `
       <div style="display:flex;flex-direction:column;gap:10px">
-        <div style="display:flex;align-items:center;gap:8px">${tierBadge(sec.tier)}<span style="font-family:${T.label};font-size:13px;font-weight:700;color:${T.pageMuted}">${TIERS[sec.tier].desc}</span><span style="flex:1;border-top:${T.divider}"></span></div>
+        ${all.length > 1 ? '' : `<div style="display:flex;align-items:center;gap:8px">${tierBadge(sec.tier)}<span style="font-family:${T.label};font-size:13px;font-weight:700;color:${T.pageMuted}">${TIERS[sec.tier].desc}</span><span style="flex:1;border-top:${T.divider}"></span></div>`}
         ${sec.boxed ? `
         <div style="border:2.5px solid #111;background:#FFFFFF;color:#111;padding:12px 16px;border-radius:4px;display:flex;flex-direction:column;gap:4px">
           <div style="font-family:${T.label};font-size:12px;font-weight:800;letter-spacing:.1em;text-transform:uppercase">Boxed warning</div>
@@ -433,6 +460,14 @@ function render() {
     </nav>
 
     <section style="display:flex;flex-direction:column;gap:12px;padding:16px 18px;border-radius:${T.panelRadius};background:${T.panelBg};border:${T.panelBorder}">
+      <button ${on(() => setState({ panelOpen: !s.panelOpen }))} aria-expanded="${s.panelOpen}" style="display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;padding:0;background:none;border:none;cursor:pointer;color:${T.pageInk};text-align:left">
+        <span style="display:flex;flex-direction:column;gap:2px">
+          <span style="font-family:${T.head};font-size:17px;font-weight:700">Study settings &amp; filters</span>
+          <span style="font-family:${T.label};font-size:13px;color:${T.pageMuted}">${state.tiers.map(n => TIERS[n].name).join(' + ')} · ${dk.length + (dk.length === 1 ? ' card' : ' cards')}</span>
+        </span>
+        <span style="flex:none;font-family:${T.label};font-size:13px;font-weight:600;padding:6px 12px;border-radius:999px;border:2px solid #2A2238">${s.panelOpen ? 'Hide ▲' : 'Show ▼'}</span>
+      </button>
+      ${s.panelOpen ? `<div style="border-top:${T.divider}"></div>
       ${tierPicker()}
       <div style="border-top:${T.divider}"></div>
       <div style="display:flex;flex-wrap:wrap;gap:10px 22px;align-items:center">
@@ -462,9 +497,11 @@ function render() {
         </div>` : ''}
         <div style="display:flex;gap:12px;align-items:center;margin-left:auto">
           <span style="font-family:${T.label};font-size:14px;font-weight:700">${dk.length + (dk.length === 1 ? ' card' : ' cards')}</span>
+          ${s.mode !== 'browse' ? `<button ${on(() => resetPos({ seed: newSeed() }))} style="font-family:${T.label};font-size:13px;font-weight:600;padding:6px 12px;border-radius:999px;border:2px solid #2A2238;background:#FFFFFF;color:${T.pageInk};cursor:pointer">⇄ Shuffle</button>` : ''}
           <button ${on(() => resetPos({ route: 'All', cpl: [], sys: [], ctrlOnly: false, boxedOnly: false, missedOnly: false }))} style="font-family:${T.label};font-size:13px;background:none;border:none;color:${T.pageMuted};text-decoration:underline;cursor:pointer;padding:0">Clear filters</button>
         </div>
       </div>
+      ` : ''}
     </section>`;
 
   if (dataStatus.note) {
@@ -491,14 +528,14 @@ function render() {
       html += `
       <div style="perspective:1800px">
         <div id="flipper" class="flipper" ${on(flip)} style="transform:${s.flipped ? 'rotateY(180deg)' : 'rotateY(0deg)'}">
-          <div class="face" style="min-height:440px;display:flex;flex-direction:column;border-radius:${T.cardRadius};border:${T.cardBorder};box-shadow:${T.cardShadow};background:${sy.soft};color:${T.ink};overflow:hidden">
+          <div class="face front" style="min-height:440px;display:flex;flex-direction:column;border-radius:${T.cardRadius};border:${T.cardBorder};box-shadow:${T.cardShadow};background:${sy.soft};color:${T.ink};overflow:hidden">
             <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:20px 24px 0;flex-wrap:wrap">
               <span style="font-family:${T.label};font-size:13px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:6px 12px;border-radius:999px;background:${sy.color};color:#FFFFFF;border:2px solid #2A2238">${esc(sy.label)}</span>
               <span style="font-family:${T.label};font-size:13px;font-weight:600;color:${T.pageMuted}">${cur.route ? esc(cur.route) + ' · ' : ''}Card ${esc(position)}</span>
             </div>
             <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:30px 32px;text-align:center">
               <div style="font-family:${T.label};font-size:14px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:${sy.color}">${esc(fr.label)}</div>
-              <div style="font-family:${T.head};font-size:${fr.text.length > 26 ? '38px' : '48px'};font-weight:700;line-height:1.1;text-wrap:balance;max-width:620px;overflow-wrap:anywhere">${esc(fr.text)}</div>
+              <div style="font-family:${T.head};font-size:${fitSize(fr.text, fr.text.length > 26 ? 38 : 48, 110)};font-weight:700;line-height:1.1;text-wrap:balance;max-width:620px;overflow-wrap:normal;word-break:normal;hyphens:manual">${esc(fr.text)}</div>
               <div style="font-size:18px;line-height:1.45;max-width:560px;text-wrap:pretty;color:${T.pageMuted}">${esc(fr.sub)}</div>
             </div>
             <div style="padding:0 24px 20px;text-align:center;font-family:${T.label};font-size:13px;color:${T.pageMuted}">Click or press Space to flip · showing ${state.tiers.map(n => TIERS[n].name).join(', ')}</div>
@@ -507,16 +544,16 @@ function render() {
         </div>
       </div>
 
-      <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between">
+      <div class="gradebar" style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between">
         <div style="display:flex;gap:8px;align-items:center">
           ${s.mode === 'flash' ? `
           <div style="display:flex;gap:8px;align-items:center">
-            ${[['←', -1, 'Previous card'], ['→', 1, 'Next card']].map(([ch, n, aria]) => `<button ${on(() => step(n))} aria-label="${aria}" style="font-family:${T.head};font-size:16px;font-weight:600;width:46px;height:46px;border-radius:${T.btnRadius};border:${T.btnBorder};background:${T.btnBg};color:${T.btnFg};box-shadow:${T.btnShadow};cursor:pointer">${ch}</button>`).join('')}
+            ${[['←', -1, 'Previous card'], ['→', 1, 'Next card']].map(([ch, n, aria]) => `<button ${on(() => step(n))} aria-label="${aria}" class="arrow" style="font-family:${T.head};font-size:16px;font-weight:600;width:46px;height:46px;border-radius:${T.btnRadius};border:${T.btnBorder};background:${T.btnBg};color:${T.btnFg};box-shadow:${T.btnShadow};cursor:pointer">${ch}</button>`).join('')}
           </div>` : ''}
-          <span style="font-family:${T.label};font-size:14px;font-weight:600;color:${T.pageMuted}">${esc(statusLabel)}</span>
+          <span class="gstatus" style="font-family:${T.label};font-size:14px;font-weight:600;color:${T.pageMuted}">${esc(statusLabel)}</span>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
-          ${gradeBtns.map(g => `<button ${on(g.onClick)} style="display:flex;flex-direction:column;align-items:center;gap:1px;min-width:92px;font-family:${T.head};font-size:16px;font-weight:600;padding:10px 16px;border-radius:${T.btnRadius};border:${T.btnBorder};background:${g.bg};color:${g.fg};box-shadow:${T.btnShadow};cursor:pointer">${esc(g.label)}<span style="font-family:${T.label};font-size:11px;font-weight:600;opacity:.85">${esc(g.sub)}</span></button>`).join('')}
+          ${gradeBtns.map(g => `<button class="gbtn" ${on(g.onClick)} style="display:flex;flex-direction:column;align-items:center;gap:1px;min-width:92px;font-family:${T.head};font-size:16px;font-weight:600;padding:10px 16px;border-radius:${T.btnRadius};border:${T.btnBorder};background:${g.bg};color:${g.fg};box-shadow:${T.btnShadow};cursor:pointer">${esc(g.label)}<span class="gsub" style="font-family:${T.label};font-size:11px;font-weight:600;opacity:.85">${esc(g.sub)}</span></button>`).join('')}
         </div>
       </div>`;
     }
@@ -539,7 +576,7 @@ function render() {
         </div>
         <div style="display:flex;flex-direction:column;gap:12px;padding:26px 28px 30px">
           <div style="font-family:${T.label};font-size:14px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${sy.color}">${esc(q.question)}</div>
-          <div style="font-family:${T.head};font-size:${q.stemSize};font-weight:700;line-height:1.25;text-wrap:pretty">${esc(q.stem)}</div>
+          <div style="font-family:${T.head};font-size:${q.stem.length > 60 ? q.stemSize : fitSize(q.stem, parseInt(q.stemSize), 110)};font-weight:700;line-height:1.25;text-wrap:pretty">${esc(q.stem)}</div>
         </div>
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:10px">
@@ -579,7 +616,8 @@ function render() {
 function browseHtml(dk) {
   const s = state;
   const q = s.search.trim().toLowerCase();
-  const rows = dk.filter(d => !q || [d.generic, d.brand, d.cls, ...d.ind].join(' ').toLowerCase().includes(q));
+  const rows = dk.filter(d => !q || [d.generic, d.brand, d.cls, ...d.ind].join(' ').toLowerCase().includes(q))
+    .sort((a, b) => a.generic.localeCompare(b.generic));
   if (!rows.length) return `<div style="grid-column:1/-1;padding:30px;text-align:center;color:${T.pageMuted}">No drugs match “${esc(s.search)}”.</div>`;
   return rows.map(d => {
     const sy = SYS[d.sys];
@@ -626,6 +664,7 @@ window.addEventListener('keydown', e => {
   const { mode } = state;
   if (mode !== 'flash' && mode !== 'sr') return;
   if (e.code === 'Space') { e.preventDefault(); flip(); }
+  if (state.flipped && ['1', '2', '3'].includes(e.key) && hasTier(+e.key)) setState({ backTier: +e.key });
   if (mode === 'flash' && e.key === 'ArrowRight') step(1);
   if (mode === 'flash' && e.key === 'ArrowLeft') step(-1);
 });

@@ -281,13 +281,46 @@ function backSections(d) {
 /* =====================================================================
    6. QUIZ — only asks about the tiers that are switched on
    ===================================================================== */
+// Words that are part of salt/formulation names, ignored when checking if a text "gives away" a drug name.
+const NAME_STOP = new Set('sodium hydrochloride calcium potassium sulfate magnesium chloride acetate tartrate succinate maleate besylate phosphate citrate mesylate bromide fumarate bitartrate acetonide propionate dihydrate trihydrate monohydrate crystalline hyclate oxalate hydrobromide dimesylate xinafoate furoate recombinant origin extended release topical inhalation nasal transdermal tablets'.split(' '));
+const nameWords = d => (String(d.generic + ' ' + d.brand).toLowerCase().match(/[a-z]{5,}/g) || []).filter(w => !NAME_STOP.has(w));
+const mentions = (text, d) => { const t = String(text).toLowerCase(); return nameWords(d).some(w => t.includes(w)); };
+const wordSet = t => new Set(String(t).toLowerCase().match(/[a-z0-9]{4,}/g) || []);
+// Share of words two texts have in common (0 = nothing alike, 1 = same words).
+const similarity = (a, b) => { const A = wordSet(a), B = wordSet(b); let n = 0; for (const w of A) if (B.has(w)) n++; return n / Math.max(1, Math.min(A.size, B.size)); };
+const onlyHypersensitivity = t => /^(none\.?|hypersensitivity[^;]*\.?)$/i.test(String(t).trim());
+
+/* Each Tier 2/3 field is asked both ways:
+   "forward"  = show the information, pick the drug;
+   "reverse"  = show the drug, pick the information. */
+const QUIZ_FIELDS = [
+  { f: 'moa',    tier: 2, fwd: 'Which drug works this way?',              inv: 'How does this drug work?' },
+  { f: 'mon',    tier: 2, fwd: 'Which drug needs this monitoring?',       inv: 'What should be monitored?' },
+  { f: 'forms',  tier: 2, fwd: null,                                      inv: 'Which dosage forms are available?' },
+  { f: 'boxed',  tier: 3, fwd: 'Which drug carries this boxed warning?',  inv: 'What is its boxed warning?' },
+  { f: 'contra', tier: 3, fwd: null,                                      inv: 'What are its contraindications?' },
+  { f: 'ae',     tier: 3, fwd: 'Which drug has these common adverse effects?', inv: 'What are its common adverse effects?' },
+  { f: 'coun',   tier: 3, fwd: 'Which drug goes with this counseling?',   inv: 'Which counseling points go with it?' },
+];
+const usable = (x, f) => x[f] && !(f === 'contra' && onlyHypersensitivity(x[f]));
 const QUIZ_TYPES = [
-  { tier: 1, q: 'Which drug class?', stem: d => d.generic, ans: d => d.cls, need: d => d.cls, otherSys: true },
-  { tier: 1, q: 'What is the generic name?', stem: d => d.brand, ans: d => d.generic, need: d => d.brand },
-  { tier: 1, q: 'Primary FDA indication?', stem: d => d.generic, ans: d => d.ind[0], need: d => d.ind[0], otherSys: true },
-  { tier: 2, q: 'Which drug works this way?', stem: d => d.moa, ans: d => d.generic, need: d => d.moa, otherCls: 'moa' },
-  { tier: 3, q: 'Which drug carries this boxed warning?', stem: d => d.boxed, ans: d => d.generic, need: d => d.boxed, otherCls: 'boxed' },
-  { tier: 3, q: 'Which drug has these common adverse effects?', stem: d => d.ae, ans: d => d.generic, need: d => d.ae, otherSys: true },
+  { tier: 1, q: 'Which drug class?', stem: d => d.generic, ans: d => d.cls, need: d => d.cls,
+    ok: (x, d) => x.sys !== d.sys },
+  { tier: 1, q: 'What is the generic name?', stem: d => d.brand, ans: d => d.generic, need: d => d.brand,
+    ok: (x, d) => x.generic !== d.generic },
+  { tier: 1, q: 'Primary FDA indication?', stem: d => d.generic, ans: d => d.ind[0], need: d => d.ind[0],
+    ok: (x, d) => x.sys !== d.sys && !d.ind.includes(x.ind[0]) },
+  ...QUIZ_FIELDS.filter(F => F.fwd).map(F => ({
+    tier: F.tier, q: F.fwd, stem: d => d[F.f], ans: d => d.generic,
+    need: d => usable(d, F.f) && !mentions(d[F.f], d),
+    ok: (x, d) => x.generic !== d.generic && x.cls !== d.cls && (!x[F.f] || similarity(x[F.f], d[F.f]) < 0.5),
+  })),
+  ...QUIZ_FIELDS.map(F => ({
+    tier: F.tier, q: F.inv, reverse: true, stem: d => d.generic, sub: d => d.brand, ans: d => d[F.f],
+    need: d => usable(d, F.f) && !mentions(d[F.f], d),
+    ok: (x, d) => usable(x, F.f) && x.cls !== d.cls && !mentions(x[F.f], x) && !mentions(x[F.f], d) &&
+                  similarity(x[F.f], d[F.f]) < 0.35,
+  })),
 ];
 function quiz(dk) {
   const s = state;
@@ -299,16 +332,16 @@ function quiz(dk) {
     if (t.length) { d = cand; types = t; break; }
   }
   if (!d) return null;
-  const ty = types[hash(d.id + s.qn) % types.length];
+  const ty = types[hash(d.id + s.qn + s.seed) % types.length];
   const correct = ty.ans(d);
-  // Wrong answers come from drugs in a different class or body system, so they can't also be right.
-  const pool = [...new Set(DRUGS.filter(x =>
-      x.id !== d.id && ty.ans(x) && ty.ans(x) !== correct &&
-      (!ty.otherSys || x.sys !== d.sys) &&
-      (!ty.otherCls || (x.cls !== d.cls && x[ty.otherCls] !== d[ty.otherCls])))
-    .map(ty.ans))]
-    .sort((a, b) => hash(a + s.qn) - hash(b + s.qn)).slice(0, 3);
-  const opts = [correct, ...pool].sort((a, b) => hash(b + 'x' + s.qn) - hash(a + 'x' + s.qn));
+  // Wrong answers: never true for this drug (different class, different wording),
+  // and drawn from the same body system first so they look plausible.
+  const seen = new Set([correct]), pool = [];
+  DRUGS.filter(x => x.id !== d.id && ty.ans(x) && ty.ok(x, d))
+    .map(x => ({ x, rank: (x.sys === d.sys ? 0 : 1) * 1e10 + hash(x.id + d.id + s.seed + s.qn) }))
+    .sort((a, b) => a.rank - b.rank)
+    .forEach(({ x }) => { const v = ty.ans(x); if (pool.length < 3 && !seen.has(v)) { seen.add(v); pool.push(v); } });
+  const opts = [correct, ...pool].sort((a, b) => hash(b + s.seed + s.qn) - hash(a + s.seed + s.qn));
   const answered = s.picked != null;
   const sy = SYS[d.sys];
   const options = opts.map((o, i) => {
@@ -321,9 +354,9 @@ function quiz(dk) {
   });
   const stem = ty.stem(d);
   return {
-    d, sy, tier: ty.tier, question: ty.q, stem, stemSize: stem.length > 140 ? '20px' : stem.length > 60 ? '24px' : '38px',
+    d, sy, tier: ty.tier, question: ty.q, stem, sub: ty.sub ? ty.sub(d) : '', stemSize: stem.length > 140 ? '20px' : stem.length > 60 ? '24px' : '38px',
     options, answered, score: s.score, total: s.total,
-    feedback: !answered ? '' : s.picked === correct ? 'Correct.' : 'Answer: ' + correct,
+    feedback: !answered ? '' : s.picked === correct ? 'Correct.' : ty.reverse ? 'Not quite. The correct answer is shown in green.' : 'Answer: ' + correct,
     reveal: answered ? d.generic + (d.brand ? ' (' + d.brand + ')' : '') : '',
     next: () => setState({ qn: (dk.indexOf(d) + 1), picked: null }),
   };
@@ -577,10 +610,11 @@ function render() {
         <div style="display:flex;flex-direction:column;gap:12px;padding:26px 28px 30px">
           <div style="font-family:${T.label};font-size:14px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${sy.color}">${esc(q.question)}</div>
           <div style="font-family:${T.head};font-size:${q.stem.length > 60 ? q.stemSize : fitSize(q.stem, parseInt(q.stemSize), 110)};font-weight:700;line-height:1.25;text-wrap:pretty">${esc(q.stem)}</div>
+          ${q.sub ? `<div style="font-size:18px;font-weight:600;color:${T.pageMuted}">${esc(q.sub)}</div>` : ''}
         </div>
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:10px">
-        ${q.options.map(o => `<button ${on(o.onClick)} style="display:flex;align-items:center;gap:12px;text-align:left;font-family:${T.body};font-size:17px;font-weight:600;line-height:1.35;padding:16px 18px;border-radius:${T.btnRadius};border:${T.btnBorder};background:${o.bg};color:${o.fg};box-shadow:${T.btnShadow};cursor:pointer"><span style="flex:none;display:grid;place-items:center;width:30px;height:30px;border-radius:50%;font-family:${T.label};font-size:14px;font-weight:800;background:${o.keyBg};color:${o.keyFg}">${o.key}</span><span>${esc(o.label)}</span></button>`).join('')}
+        ${q.options.map(o => `<button ${on(o.onClick)} style="display:flex;align-items:center;gap:12px;text-align:left;font-family:${T.body};font-size:${o.label.length > 70 ? 15 : 17}px;font-weight:600;line-height:1.35;padding:16px 18px;border-radius:${T.btnRadius};border:${T.btnBorder};background:${o.bg};color:${o.fg};box-shadow:${T.btnShadow};cursor:pointer"><span style="flex:none;display:grid;place-items:center;width:30px;height:30px;border-radius:50%;font-family:${T.label};font-size:14px;font-weight:800;background:${o.keyBg};color:${o.keyFg}">${o.key}</span><span>${esc(o.label)}</span></button>`).join('')}
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;min-height:48px">
         <span style="display:flex;flex-direction:column;gap:2px"><span style="font-family:${T.head};font-size:18px;font-weight:600">${esc(q.feedback)}</span>${q.answered ? `<span style="font-size:14px;color:${T.pageMuted}">Card: ${esc(q.reveal)}</span>` : ''}</span>

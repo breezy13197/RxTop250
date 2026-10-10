@@ -45,7 +45,10 @@ Until step 3 is done, the app shows the saved copy and a note saying the live sh
 
 Students switch each tier on or off with the **Study** buttons at the top of the app. Any combination works, but at least one tier must stay on.
 - The back of each card shows only the tiers that are switched on. When more than one tier is on, tabs at the top of the card back switch between them, so the card stays short (on a computer, the keys 1, 2 and 3 do the same).
-- The **Quiz** only asks about the tiers that are switched on. For example, with only Tier 3 on, it asks about boxed warnings and adverse effects.
+- The **Quiz** only asks about the tiers that are switched on. Tier 2 and Tier 3 questions go both ways:
+  - *Information → drug:* "Which drug carries this boxed warning?"
+  - *Drug → information:* "Lisinopril: what is its boxed warning?" (also mechanism, monitoring, dosage forms, contraindications, adverse effects and counseling).
+  - Wrong answers come from drugs in a different class, with clearly different wording, so they can't also be correct. Where possible they come from the same body system, so they look believable.
 - The generic and brand name always appear at the top of the card back, because they are the answer to the card.
 
 ---

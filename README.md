@@ -13,7 +13,7 @@ Interactive drug-information flashcards for pharmacy students, built from Sigler
 |---|---|---|
 | `index.html` | The app itself. Open it in any web browser. | Students and faculty |
 | Google Sheet **"Rx Flashcards – Drug Data"** | The master list of drugs. One row per drug, one column per piece of information. | Faculty (editing) |
-| `data/drugs-backup.js` | A saved copy of the drug data from 2026-10-09. The app uses it only if it can't reach the Google Sheet (for example, with no internet). | Nobody edits this |
+| `data/drugs-backup.js` | A saved copy of the drug data. The app uses it only if it can't reach the Google Sheet (for example, with no internet). It refreshes itself every Monday (see section 11). | Nobody edits this |
 
 *Background:* when a student opens the app, it first shows the saved copy so the page appears instantly. Then it quietly downloads the latest version of the Google Sheet and switches to it. The small line at the bottom of the app says which one is showing: **"live from the faculty Google Sheet"** or **"saved copy"**.
 
@@ -165,3 +165,15 @@ Everything below is saved in the browser's own storage (called *localStorage*) o
 | `rxcards-front` | Card-front setting (Generic, Brand, Clues, Random) |
 
 Not saved: filters, shuffle order, quiz score and which mode you were in. Those reset when the page is reopened. Clearing browser data (or using a private window) erases everything above. The old `rxcards-missed` list from earlier versions is converted once into "weak in every skill" and then no longer used.
+
+## 11. Keeping the backup copy up to date
+
+`data/drugs-backup.js` is refreshed automatically by a **GitHub Action** (a small job that GitHub runs for you; its instructions are in `.github/workflows/refresh-backup.yml`).
+
+- **When it runs:** every Monday morning, and any time you press the button (below).
+- **What it does:** downloads the Drugs tab of the Google Sheet, checks it looks right (has a "Generic" column and at least 50 drugs), and rewrites the backup file. If nothing changed since last time, it does nothing. If the Sheet can't be read, it leaves the old backup alone and the run shows a red ✗ in the Actions tab.
+- **Run it now** (for example after adding lots of drugs): on GitHub open the repository → **Actions** → **Refresh drug backup** → **Run workflow** → **Run workflow**. Wait a minute, then refresh the page to see a new commit called "Refresh drug backup from Google Sheet".
+- **Requirement:** the Sheet must be shared as "Anyone with the link → Viewer" (section 2), because the job reads it the same way the app does.
+- **GitHub only runs scheduled jobs from the repository's main branch.** Until this work is merged into `main`, the Monday schedule and the Run workflow button will not appear.
+- **Not included:** the Lists tab. Those lists are saved in each student's browser instead.
+- **Running it by hand** (optional, needs Node.js 18 or newer): `node scripts/refresh-backup.mjs` in the project folder.

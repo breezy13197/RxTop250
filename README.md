@@ -2,7 +2,7 @@
 
 Interactive drug-information flashcards for pharmacy students, built from Sigler's Top 250 Oral & Parenteral Drugs (249 drugs).
 
-- **Students** choose which information tiers to study and practise with flip cards, a quiz, spaced review and a searchable list.
+- **Students** choose which information tiers to study and practise with flip cards, a quiz, a progress page, their own custom lists and a searchable list.
 - **Faculty** edit the drug information in a Google Sheet. The app reads the sheet each time it opens, so edits appear without touching any code.
 
 ---
@@ -112,8 +112,48 @@ Students need a web address to open the app. The free option is **GitHub Pages**
 - On phones, the **Study settings & filters** panel starts folded up so the card is visible straight away; tap **Show** to open it. The grading buttons stay pinned to the bottom of the screen.
 - Long drug names shrink to fit instead of breaking in the middle of a word.
 
-## 8. Saved progress
+## 8. Tracking what you know, skill by skill
 
-Each student's **missed cards**, **chosen tiers** and **card-front setting** are saved in their own browser, on that device only. Nothing is sent anywhere. Clearing browser data resets them.
+Instead of marking a whole card "missed", the app tracks **seven skills** for every drug:
 
-Known limitation: **Spaced review** works within one study session. The "1 day" and "4 days" labels match the design, but cards are not yet scheduled for future days.
+| Skill | Tier | What it covers |
+|---|---|---|
+| Names | 1 | Brand ↔ generic |
+| Class & uses | 1 | Therapeutic class, FDA indications |
+| Mechanism | 2 | Mechanism of action |
+| Dosing & monitoring | 2 | Dosage forms, monitoring |
+| Safety warnings | 3 | Boxed warning, contraindications |
+| Adverse effects | 3 | Common adverse effects |
+| Counseling | 3 | Patient counseling points |
+
+*Background:* a student can know a drug's name and class but not its mechanism. Grading the whole card as one pass/fail hides that, so each skill gets its own result.
+
+- **Flip & grade:** flip the card, then tap any part you missed (the **Missed part?** row above the buttons) and press **Save**. Press **Got it** if you knew everything, or **Missed it** if you missed it all. Only skills in the tiers you've switched on are graded.
+- **Quiz:** each question belongs to one skill. A right or wrong answer counts toward that skill only.
+- **Status:** each skill keeps your last four answers. ✓ **Solid** = right the last two times, ~ **Learning** = right last time, ✗ **Weak** = wrong last time, · **Not tried** = no answers yet.
+- **My progress page:** a bar for each skill, a drug-by-drug table, and **Practise weak** buttons. It covers whichever cards are currently selected (so choosing one of your lists shows progress for just that list).
+- **Weak spots filter** (in *Study settings & filters*): study only drugs you were weak in, either in any skill or one skill. In the Quiz, questions then focus on the weak skill. The set of cards is fixed when you pick the filter, so cards don't disappear as you improve; press **Shuffle** to rebuild it.
+- **Spaced review was removed.** Weak-spot practice replaces it. Cards are not scheduled for future days.
+
+## 9. My lists (custom decks)
+
+For a quiz on a certain set of drugs, open **My lists**:
+1. Press **+ Make my first list** and give it a name.
+2. Add drugs by **pasting names** (from a syllabus or study guide; brand or generic, separated by commas or new lines; any it can't find are listed so you can add them by hand) and/or by **ticking** drugs in the searchable list below.
+3. Press **Study this list**. Flip & grade, Quiz, My progress and Browse then use only that list.
+
+Switch lists, or go back to all drugs, with the **My list** buttons in *Study settings & filters*. The other filters (route, tiers and so on) still apply on top of the list.
+
+## 10. What is saved in the browser
+
+Everything below is saved in the browser's own storage (called *localStorage*) on that device only. Nothing is sent anywhere and there are no accounts, so progress does not follow a student to another phone or computer.
+
+| Saved as | What it holds |
+|---|---|
+| `rxcards-skills` | Your last four answers for each skill of each drug |
+| `rxcards-lists` | Your custom lists (names and drugs) |
+| `rxcards-activelist` | Which list you were studying |
+| `rxcards-tiers` | Which tiers are switched on |
+| `rxcards-front` | Card-front setting (Generic, Brand, Clues, Random) |
+
+Not saved: filters, shuffle order, quiz score and which mode you were in. Those reset when the page is reopened. Clearing browser data (or using a private window) erases everything above. The old `rxcards-missed` list from earlier versions is converted once into "weak in every skill" and then no longer used.

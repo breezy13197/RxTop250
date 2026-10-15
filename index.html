@@ -10,14 +10,16 @@
 body{margin:0;-webkit-font-smoothing:antialiased;background:#FFF7EC}
 *{box-sizing:border-box}
 a{color:#6741D9}a:hover{color:#4C2BB0}
-input::placeholder{color:#8A8296}
+input::placeholder,textarea::placeholder{color:#8A8296}
+.skillrow{scrollbar-width:thin}
 button{-webkit-tap-highlight-color:transparent}
 .flipper{display:grid;transform-style:preserve-3d;transition:transform .55s cubic-bezier(.2,.75,.25,1);cursor:pointer}
 .face{grid-area:1/1;backface-visibility:hidden;-webkit-backface-visibility:hidden}
 @media (max-width:560px){.wrap{padding:18px 14px 48px !important}.h1{font-size:32px !important}
   .front{min-height:300px !important}
   /* Keep the grading buttons on screen while scrolling a long card back */
-  .gradebar{position:sticky;bottom:0;z-index:5;background:#FFF7EC;margin:0 -14px;padding:10px 14px calc(10px + env(safe-area-inset-bottom));border-top:2px dashed #E3D9CC;flex-wrap:nowrap !important;gap:8px !important}
+  .gradebar{position:sticky;bottom:0;z-index:5;background:#FFF7EC;margin:0 -14px;padding:10px 14px calc(10px + env(safe-area-inset-bottom));border-top:2px dashed #E3D9CC;gap:8px !important}
+  .gradeline{flex-wrap:nowrap !important;gap:8px !important}
   .gradebar .gstatus,.gradebar .gsub{display:none}
   .gradebar .gbtn{min-width:0 !important;padding:10px 12px !important;font-size:15px !important}
   .gradebar .arrow{width:42px !important;height:42px !important}}
@@ -155,7 +157,6 @@ async function loadLiveData() {
       note: DRUGS.length ? 'Showing the saved copy of the drug data from ' + snap + ' (the live Google Sheet could not be reached).'
                          : 'Could not load the drug data. Check your internet connection and refresh.' };
   }
-  state.srQueue = null;
   render();
 }
 
@@ -182,36 +183,99 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', 
 
 /* =====================================================================
    4. APP STATE
-   Remembered in this browser: missed cards, chosen tiers, card front.
+   Remembered in this browser: per-skill progress, custom lists, chosen tiers, card front.
    ===================================================================== */
 const store = {
   get(k, fallback) { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? fallback : v; } catch (e) { return fallback; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} },
 };
+/* "Skills" are the separate things a student can know about a drug. Each card
+   is graded per skill, so the app can tell "knows the names but not the mechanism". */
+const SKILLS = {
+  names:  { tier: 1, label: 'Names',               short: 'Names' },
+  uses:   { tier: 1, label: 'Class & uses',        short: 'Uses' },
+  moa:    { tier: 2, label: 'Mechanism',           short: 'MOA' },
+  mon:    { tier: 2, label: 'Dosing & monitoring', short: 'Mon.' },
+  safety: { tier: 3, label: 'Safety warnings',     short: 'Safety' },
+  ae:     { tier: 3, label: 'Adverse effects',     short: 'AEs' },
+  coun:   { tier: 3, label: 'Counseling',          short: 'Couns.' },
+};
+const STATUS = {
+  solid:    { color: '#237032', glyph: '✓', text: 'Solid' },
+  learning: { color: '#9A6700', glyph: '~', text: 'Learning' },
+  weak:     { color: '#B42318', glyph: '✗', text: 'Weak' },
+  new:      { color: '#8A8296', glyph: '·', text: 'Not tried' },
+};
 const savedTiers = store.get('rxcards-tiers', [1, 2, 3]);
+const loadLists = () => {
+  const v = store.get('rxcards-lists', []);
+  return Array.isArray(v) ? v.filter(l => l && l.id && Array.isArray(l.ids)).map(l => ({ id: String(l.id), name: String(l.name || 'My list'), ids: l.ids.map(String) })) : [];
+};
+// progress = { drugId: { skill: "0110" } }  (last 4 results for each skill, 1 = knew it, 0 = missed)
+let progress = store.get('rxcards-skills', null);
+if (!progress || typeof progress !== 'object' || Array.isArray(progress)) {
+  progress = {};
+  // Older versions saved a plain "missed cards" list. Treat those cards as weak in every skill.
+  const old = store.get('rxcards-missed', []);
+  if (Array.isArray(old)) old.forEach(id => { progress[id] = Object.fromEntries(Object.keys(SKILLS).map(k => [k, '0'])); });
+  store.set('rxcards-skills', progress);
+}
 const state = {
   mode: 'flash',
   tiers: Array.isArray(savedTiers) && savedTiers.length ? savedTiers.filter(t => TIERS[t]) : [1, 2, 3],
   front: store.get('rxcards-front', 'Generic'),
-  route: 'All', cpl: [], sys: [], ctrlOnly: false, boxedOnly: false, remsOnly: false, nioshOnly: false, missedOnly: false,
-  idx: 0, flipped: false, missed: store.get('rxcards-missed', []), srQueue: null, search: '',
+  route: 'All', cpl: [], sys: [], ctrlOnly: false, boxedOnly: false, remsOnly: false, nioshOnly: false,
+  weak: null,        // null, 'any', or a skill name: study only drugs that were weak in it...
+  weakSnap: null,    // ...as of the moment it was chosen (so cards don't vanish mid-session)
+  idx: 0, flipped: false, skillMiss: [], search: '',
+  lists: loadLists(), activeList: store.get('rxcards-activelist', null), listEdit: null,
+  lsearch: '', lonly: false, paste: '', pasteMsg: '',
   qn: 0, picked: null, score: 0, total: 0,
   seed: newSeed(),   // card order is shuffled with this; the Shuffle button makes a new one
   backTier: null,    // which tier tab is open on the back of the card
   panelOpen: window.innerWidth >= 700,   // settings panel starts folded on phones
 };
-if (!Array.isArray(state.missed)) state.missed = [];
+if (!state.lists.some(l => l.id === state.activeList)) state.activeList = null;
+state.listEdit = state.activeList || (state.lists[0] && state.lists[0].id) || null;
+if (!Array.isArray(state.tiers) || !state.tiers.length) state.tiers = [1, 2, 3];
 
 function setState(patch) {
   Object.assign(state, patch);
   if ('tiers' in patch) store.set('rxcards-tiers', state.tiers);
   if ('front' in patch) store.set('rxcards-front', state.front);
+  if ('activeList' in patch) store.set('rxcards-activelist', state.activeList);
   render();
 }
 const hasTier = n => state.tiers.includes(n);
-function deck() {
-  const s = state;
+const activeSkills = () => Object.keys(SKILLS).filter(k => hasTier(SKILLS[k].tier));
+const skillStatus = (id, skill) => {
+  const h = (progress[id] || {})[skill] || '';
+  return !h ? 'new' : h.endsWith('0') ? 'weak' : h.endsWith('11') ? 'solid' : 'learning';
+};
+const weakSkillsOf = id => activeSkills().filter(k => skillStatus(id, k) === 'weak');
+function recordSkill(id, skill, ok) {
+  const p = progress[id] || (progress[id] = {});
+  p[skill] = ((p[skill] || '') + (ok ? '1' : '0')).slice(-4);
+  store.set('rxcards-skills', progress);
+}
+// Grades every skill that is switched on; "missedSkills" is a list of skills, or 'all'.
+function gradeCard(id, missedSkills) {
+  activeSkills().forEach(k => recordSkill(id, k, missedSkills !== 'all' && !missedSkills.includes(k)));
+}
+// Which drugs are weak (right now) in a skill, or in any skill. Used to build a weak-spot study set.
+function weakSnapshot(v) {
+  if (!v) return null;
+  const m = {};
+  DRUGS.forEach(d => { const w = weakSkillsOf(d.id).filter(k => v === 'any' || k === v); if (w.length) m[d.id] = w; });
+  return m;
+}
+const setWeak = v => resetPos({ weak: state.weak === v ? null : v, weakSnap: state.weak === v ? null : weakSnapshot(v) });
+const activeListObj = () => state.lists.find(l => l.id === state.activeList) || null;
+
+function deck(ignoreWeak) {
+  const s = state, list = activeListObj(), inList = list ? new Set(list.ids) : null;
   return DRUGS.filter(d =>
+    (!inList || inList.has(d.id)) &&
     (s.route === 'All' || d.routeGroup === s.route) &&
     (!s.cpl.length || s.cpl.includes(d.cpl)) &&
     (!s.sys.length || s.sys.includes(d.sys)) &&
@@ -219,29 +283,18 @@ function deck() {
     (!s.boxedOnly || !!d.boxed) &&
     (!s.remsOnly || !!d.rems) &&
     (!s.nioshOnly || !!d.niosh) &&
-    (!s.missedOnly || s.missed.includes(d.id)))
+    (ignoreWeak || !s.weakSnap || !!s.weakSnap[d.id]))
     .sort((a, b) => hash(a.id + s.seed) - hash(b.id + s.seed));
 }
-function resetPos(extra = {}) { setState({ idx: 0, flipped: false, srQueue: null, qn: 0, picked: null, ...extra }); }
-function step(n) { const len = deck().length || 1; setState({ idx: (state.idx + n + len) % len, flipped: false }); }
-function setMissed(id, isMissed) {
-  const set = new Set(state.missed); isMissed ? set.add(id) : set.delete(id);
-  state.missed = [...set];
-  store.set('rxcards-missed', state.missed);
-}
-function srGrade(grade, id) {
-  const pos = { again: 1, hard: 3 }[grade];
-  if (grade === 'again') setMissed(id, true);
-  if (grade === 'good' || grade === 'easy') setMissed(id, false);
-  const q = state.srQueue.slice(1);
-  if (pos != null) q.splice(Math.min(pos, q.length), 0, id);
-  setState({ srQueue: q, flipped: false });
-}
+function resetPos(extra = {}) { setState({ idx: 0, flipped: false, skillMiss: [], qn: 0, picked: null, ...extra }); }
+function step(n) { const len = deck().length || 1; setState({ idx: (state.idx + n + len) % len, flipped: false, skillMiss: [] }); }
 function toggleTier(n) {
   const on = hasTier(n);
   if (on && state.tiers.length === 1) return; // keep at least one tier on
   const tiers = on ? state.tiers.filter(t => t !== n) : [...state.tiers, n].sort();
-  setState({ tiers, flipped: state.flipped, picked: null });
+  const weakGone = state.weak && state.weak !== 'any' && !tiers.includes(SKILLS[state.weak].tier);
+  setState({ tiers, flipped: state.flipped, picked: null, skillMiss: [],
+    ...(weakGone ? { weak: null, weakSnap: null } : {}) });
 }
 /* Flipping only swaps the card's rotation, so the 3D animation plays smoothly. */
 function flip() {
@@ -300,29 +353,29 @@ const onlyHypersensitivity = t => /^(none\.?|hypersensitivity[^;]*\.?)$/i.test(S
    "forward"  = show the information, pick the drug;
    "reverse"  = show the drug, pick the information. */
 const QUIZ_FIELDS = [
-  { f: 'moa',    tier: 2, fwd: 'Which drug works this way?',              inv: 'How does this drug work?' },
-  { f: 'mon',    tier: 2, fwd: 'Which drug needs this monitoring?',       inv: 'What should be monitored?' },
-  { f: 'forms',  tier: 2, fwd: null,                                      inv: 'Which dosage forms are available?' },
-  { f: 'boxed',  tier: 3, fwd: 'Which drug carries this boxed warning?',  inv: 'What is its boxed warning?' },
-  { f: 'contra', tier: 3, fwd: null,                                      inv: 'What are its contraindications?' },
-  { f: 'ae',     tier: 3, fwd: 'Which drug has these common adverse effects?', inv: 'What are its common adverse effects?' },
-  { f: 'coun',   tier: 3, fwd: 'Which drug goes with this counseling?',   inv: 'Which counseling points go with it?' },
+  { f: 'moa',    tier: 2, skill: 'moa',    fwd: 'Which drug works this way?',              inv: 'How does this drug work?' },
+  { f: 'mon',    tier: 2, skill: 'mon',    fwd: 'Which drug needs this monitoring?',       inv: 'What should be monitored?' },
+  { f: 'forms',  tier: 2, skill: 'mon',    fwd: null,                                      inv: 'Which dosage forms are available?' },
+  { f: 'boxed',  tier: 3, skill: 'safety', fwd: 'Which drug carries this boxed warning?',  inv: 'What is its boxed warning?' },
+  { f: 'contra', tier: 3, skill: 'safety', fwd: null,                                      inv: 'What are its contraindications?' },
+  { f: 'ae',     tier: 3, skill: 'ae',     fwd: 'Which drug has these common adverse effects?', inv: 'What are its common adverse effects?' },
+  { f: 'coun',   tier: 3, skill: 'coun',   fwd: 'Which drug goes with this counseling?',   inv: 'Which counseling points go with it?' },
 ];
 const usable = (x, f) => x[f] && !(f === 'contra' && onlyHypersensitivity(x[f]));
 const QUIZ_TYPES = [
-  { tier: 1, q: 'Which drug class?', stem: d => d.generic, ans: d => d.cls, need: d => d.cls,
+  { tier: 1, skill: 'uses', q: 'Which drug class?', stem: d => d.generic, ans: d => d.cls, need: d => d.cls,
     ok: (x, d) => x.sys !== d.sys },
-  { tier: 1, q: 'What is the generic name?', stem: d => d.brand, ans: d => d.generic, need: d => d.brand,
+  { tier: 1, skill: 'names', q: 'What is the generic name?', stem: d => d.brand, ans: d => d.generic, need: d => d.brand,
     ok: (x, d) => x.generic !== d.generic },
-  { tier: 1, q: 'Primary FDA indication?', stem: d => d.generic, ans: d => d.ind[0], need: d => d.ind[0],
+  { tier: 1, skill: 'uses', q: 'Primary FDA indication?', stem: d => d.generic, ans: d => d.ind[0], need: d => d.ind[0],
     ok: (x, d) => x.sys !== d.sys && !d.ind.includes(x.ind[0]) },
   ...QUIZ_FIELDS.filter(F => F.fwd).map(F => ({
-    tier: F.tier, q: F.fwd, stem: d => d[F.f], ans: d => d.generic,
+    tier: F.tier, skill: F.skill, q: F.fwd, stem: d => d[F.f], ans: d => d.generic,
     need: d => usable(d, F.f) && !mentions(d[F.f], d),
     ok: (x, d) => x.generic !== d.generic && x.cls !== d.cls && (!x[F.f] || similarity(x[F.f], d[F.f]) < 0.5),
   })),
   ...QUIZ_FIELDS.map(F => ({
-    tier: F.tier, q: F.inv, reverse: true, stem: d => d.generic, sub: d => d.brand, ans: d => d[F.f],
+    tier: F.tier, skill: F.skill, q: F.inv, reverse: true, stem: d => d.generic, sub: d => d.brand, ans: d => d[F.f],
     need: d => usable(d, F.f) && !mentions(d[F.f], d),
     ok: (x, d) => usable(x, F.f) && x.cls !== d.cls && !mentions(x[F.f], x) && !mentions(x[F.f], d) &&
                   similarity(x[F.f], d[F.f]) < 0.35,
@@ -334,7 +387,10 @@ function quiz(dk) {
   let d = null, types = [];
   for (let k = 0; k < dk.length; k++) {
     const cand = dk[(s.qn + k) % dk.length];
-    const t = QUIZ_TYPES.filter(x => hasTier(x.tier) && x.need(cand));
+    let t = QUIZ_TYPES.filter(x => hasTier(x.tier) && x.need(cand));
+    // When studying weak spots, ask about the skill the student was weak in.
+    const ws = s.weakSnap && s.weakSnap[cand.id], pref = ws ? t.filter(x => ws.includes(x.skill)) : [];
+    if (pref.length) t = pref;
     if (t.length) { d = cand; types = t; break; }
   }
   if (!d) return null;
@@ -356,11 +412,11 @@ function quiz(dk) {
     if (answered && isRight) { bg = '#237032'; fg = '#FFFFFF'; keyBg = '#FFFFFF'; keyFg = '#237032'; }
     else if (answered && isPicked) { bg = '#B42318'; fg = '#FFFFFF'; keyBg = '#FFFFFF'; keyFg = '#B42318'; }
     return { label: o, key: 'ABCD'[i], bg, fg, keyBg, keyFg,
-      onClick: () => { if (answered) return; setMissed(d.id, !isRight); setState({ picked: o, total: s.total + 1, score: s.score + (isRight ? 1 : 0) }); } };
+      onClick: () => { if (answered) return; recordSkill(d.id, ty.skill, isRight); setState({ picked: o, total: s.total + 1, score: s.score + (isRight ? 1 : 0) }); } };
   });
   const stem = ty.stem(d);
   return {
-    d, sy, tier: ty.tier, question: ty.q, stem, sub: ty.sub ? ty.sub(d) : '', stemSize: stem.length > 140 ? '20px' : stem.length > 60 ? '24px' : '38px',
+    d, sy, tier: ty.tier, skill: ty.skill, question: ty.q, stem, sub: ty.sub ? ty.sub(d) : '', stemSize: stem.length > 140 ? '20px' : stem.length > 60 ? '24px' : '38px',
     options, answered, score: s.score, total: s.total,
     feedback: !answered ? '' : s.picked === correct ? 'Correct.' : ty.reverse ? 'Not quite. The correct answer is shown in green.' : 'Answer: ' + correct,
     reveal: answered ? d.generic + (d.brand ? ' (' + d.brand + ')' : '') : '',
@@ -381,7 +437,7 @@ function chip(active, onClick, label, extra = {}) {
 function chipHtml(c, size = '6px 12px') {
   const dot = c.dot ? `<span style="width:11px;height:11px;border-radius:50%;background:${c.dot};border:1.5px solid #2A2238"></span>` : '';
   const layout = c.dot ? 'display:flex;align-items:center;gap:7px;padding:6px 12px 6px 9px;' : `padding:${size};`;
-  return `<button ${on(c.onClick)} aria-pressed="${c.bg !== 'transparent'}" style="${layout}font-family:${T.label};font-size:13px;font-weight:600;border-radius:999px;border:${c.border};background:${c.bg};color:${c.fg};cursor:pointer">${dot}${esc(c.label)}</button>`;
+  return `<button ${c.id ? 'id="' + c.id + '" ' : ''}${on(c.onClick)} aria-pressed="${c.bg !== 'transparent'}" style="${layout}font-family:${T.label};font-size:13px;font-weight:600;border-radius:999px;border:${c.border};background:${c.bg};color:${c.fg};cursor:pointer">${dot}${esc(c.label)}</button>`;
 }
 const lbl = (text, minW) => `<span style="font-family:${T.label};font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:${T.pageMuted}${minW ? ';min-width:44px' : ''}">${text}</span>`;
 const tierBadge = (n, dark) => `<span style="flex:none;font-family:${T.label};font-size:11px;font-weight:700;letter-spacing:.04em;padding:3px 8px;border-radius:999px;background:${dark ? '#FFFFFF' : TIERS[n].color};color:${dark ? TIERS[n].color : '#FFFFFF'}">${TIERS[n].name}</span>`;
@@ -452,37 +508,32 @@ function cardBack(d, sy) {
 function render() {
   handlers = [];
   const s = state;
-  const dk = deck();
+  const dk = deck(s.mode === 'progress');
   const toggleIn = (key, v) => () => resetPos({ [key]: s[key].includes(v) ? s[key].filter(x => x !== v) : [...s[key], v] });
 
   // Which card is showing?
-  let cur = null, position = '', statusLabel = '', srDone = false;
+  let cur = null, position = '', statusLabel = '';
   if (s.mode === 'flash' && dk.length) {
     const i = s.idx % dk.length; cur = dk[i]; position = (i + 1) + ' of ' + dk.length;
-    statusLabel = position + (s.missed.length ? ' · ' + s.missed.length + ' missed' : '');
-  }
-  if (s.mode === 'sr' && dk.length) {
-    if (!s.srQueue) s.srQueue = dk.map(d => d.id);
-    const q = s.srQueue.filter(id => DRUGS.some(d => d.id === id));
-    s.srQueue = q;
-    if (q.length) { cur = DRUGS.find(d => d.id === q[0]); position = 'Review'; statusLabel = q.length + ' due this session'; }
-    else srDone = true;
+    const nWeak = DRUGS.filter(d => weakSkillsOf(d.id).length).length;
+    statusLabel = position + (nWeak ? ' · ' + nWeak + ' weak' : '');
   }
 
   let gradeBtns = [];
-  if (cur && s.mode === 'flash') gradeBtns = [
-    { label: 'Missed it', sub: 'add to missed', bg: '#B42318', fg: '#FFFFFF', onClick: () => { setMissed(cur.id, true); step(1); } },
-    { label: 'Got it', sub: 'next card', bg: '#237032', fg: '#FFFFFF', onClick: () => { setMissed(cur.id, false); step(1); } },
-  ];
-  if (cur && s.mode === 'sr') gradeBtns = [
-    { label: 'Again', sub: '< 1 min', bg: '#B42318', fg: '#FFFFFF', onClick: () => srGrade('again', cur.id) },
-    { label: 'Hard', sub: '~6 min', bg: T.btnBg, fg: T.btnFg, onClick: () => srGrade('hard', cur.id) },
-    { label: 'Good', sub: '1 day', bg: '#237032', fg: '#FFFFFF', onClick: () => srGrade('good', cur.id) },
-    { label: 'Easy', sub: '4 days', bg: '#1864AB', fg: '#FFFFFF', onClick: () => srGrade('easy', cur.id) },
-  ];
+  if (cur && s.mode === 'flash') {
+    const some = s.skillMiss.length;
+    const advance = () => {
+      // In weak-spot mode the set is fixed for the session, so a normal step is right.
+      step(1);
+    };
+    gradeBtns = [
+      { label: 'Missed it', sub: 'all of it', bg: '#B42318', fg: '#FFFFFF', onClick: () => { gradeCard(cur.id, 'all'); advance(); } },
+      { label: some ? 'Save' : 'Got it', sub: some ? some + ' to review' : 'knew it all', bg: '#237032', fg: '#FFFFFF', onClick: () => { gradeCard(cur.id, s.skillMiss); advance(); } },
+    ];
+  }
 
-  const modes = [['flash', 'Flip & grade'], ['quiz', 'Quiz'], ['sr', 'Spaced review'], ['browse', 'Browse']];
-  const showFrontPicker = s.mode === 'flash' || s.mode === 'sr';
+  const modes = [['flash', 'Flip & grade'], ['quiz', 'Quiz'], ['progress', 'My progress'], ['lists', 'My lists'], ['browse', 'Browse']];
+  const showFrontPicker = s.mode === 'flash';
 
   // ---------- Header, mode tabs, tier picker, filter panel ----------
   let html = `
@@ -496,20 +547,26 @@ function render() {
     <nav style="display:flex;gap:8px;flex-wrap:wrap">
       ${modes.map(([k, l]) => {
         const active = s.mode === k;
-        return `<button ${on(() => setState({ mode: k, flipped: false, srQueue: null }))} style="font-family:${T.head};font-size:16px;font-weight:600;padding:10px 18px;border-radius:${T.btnRadius};border:${T.btnBorder};background:${active ? T.primaryBg : T.btnBg};color:${active ? T.primaryFg : T.btnFg};box-shadow:${active ? 'none' : T.btnShadow};cursor:pointer">${l}</button>`;
+        return `<button ${on(() => setState({ mode: k, flipped: false, skillMiss: [] }))} style="font-family:${T.head};font-size:16px;font-weight:600;padding:10px 18px;border-radius:${T.btnRadius};border:${T.btnBorder};background:${active ? T.primaryBg : T.btnBg};color:${active ? T.primaryFg : T.btnFg};box-shadow:${active ? 'none' : T.btnShadow};cursor:pointer">${l}</button>`;
       }).join('')}
     </nav>
 
-    <section style="display:flex;flex-direction:column;gap:12px;padding:16px 18px;border-radius:${T.panelRadius};background:${T.panelBg};border:${T.panelBorder}">
+    ${s.mode === 'lists' ? '' : `<section style="display:flex;flex-direction:column;gap:12px;padding:16px 18px;border-radius:${T.panelRadius};background:${T.panelBg};border:${T.panelBorder}">
       <button ${on(() => setState({ panelOpen: !s.panelOpen }))} aria-expanded="${s.panelOpen}" style="display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;padding:0;background:none;border:none;cursor:pointer;color:${T.pageInk};text-align:left">
         <span style="display:flex;flex-direction:column;gap:2px">
           <span style="font-family:${T.head};font-size:17px;font-weight:700">Study settings &amp; filters</span>
-          <span style="font-family:${T.label};font-size:13px;color:${T.pageMuted}">${state.tiers.map(n => TIERS[n].name).join(' + ')} · ${dk.length + (dk.length === 1 ? ' card' : ' cards')}</span>
+          <span style="font-family:${T.label};font-size:13px;color:${T.pageMuted}">${activeListObj() ? esc(activeListObj().name) + ' · ' : ''}${state.tiers.map(n => TIERS[n].name).join(' + ')}${s.weak ? ' · weak spots' : ''} · ${dk.length + (dk.length === 1 ? ' card' : ' cards')}</span>
         </span>
         <span style="flex:none;font-family:${T.label};font-size:13px;font-weight:600;padding:6px 12px;border-radius:999px;border:2px solid #2A2238">${s.panelOpen ? 'Hide ▲' : 'Show ▼'}</span>
       </button>
       ${s.panelOpen ? `<div style="border-top:${T.divider}"></div>
       ${tierPicker()}
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        ${lbl('My list')}
+        ${chipHtml(chip(!s.activeList, () => resetPos({ activeList: null }), 'All drugs'))}
+        ${s.lists.map(l => chipHtml(chip(s.activeList === l.id, () => resetPos({ activeList: l.id }), l.name + ' (' + l.ids.length + ')'))).join('')}
+        ${chipHtml(chip(false, () => setState({ mode: 'lists', flipped: false }), s.lists.length ? '✎ Edit lists' : '+ Make a list'), '6px 12px')}
+      </div>
       <div style="border-top:${T.divider}"></div>
       <div style="display:flex;flex-wrap:wrap;gap:10px 22px;align-items:center">
         <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
@@ -525,12 +582,16 @@ function render() {
           ${chipHtml(chip(s.boxedOnly, () => resetPos({ boxedOnly: !s.boxedOnly }), 'Boxed warning'))}
           ${chipHtml(chip(s.remsOnly, () => resetPos({ remsOnly: !s.remsOnly }), 'REMS'))}
           ${chipHtml(chip(s.nioshOnly, () => resetPos({ nioshOnly: !s.nioshOnly }), 'NIOSH hazardous'))}
-          ${chipHtml(chip(s.missedOnly, () => resetPos({ missedOnly: !s.missedOnly }), 'My missed (' + s.missed.length + ')'))}
         </div>
       </div>
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
         ${lbl('Class', true)}
         ${Object.entries(SYS).map(([k, sy]) => chipHtml(chip(s.sys.includes(k), toggleIn('sys', k), sy.label, { dot: sy.color }))).join('')}
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        ${lbl('Weak spots', true)}
+        ${chipHtml(chip(s.weak === 'any', () => setWeak('any'), 'Any (' + DRUGS.filter(d => weakSkillsOf(d.id).length).length + ')'))}
+        ${activeSkills().map(k => chipHtml(chip(s.weak === k, () => setWeak(k), SKILLS[k].label + ' (' + DRUGS.filter(d => skillStatus(d.id, k) === 'weak').length + ')'))).join('')}
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;border-top:${T.divider};padding-top:12px">
         ${showFrontPicker ? `
@@ -540,32 +601,25 @@ function render() {
         </div>` : ''}
         <div style="display:flex;gap:12px;align-items:center;margin-left:auto">
           <span style="font-family:${T.label};font-size:14px;font-weight:700">${dk.length + (dk.length === 1 ? ' card' : ' cards')}</span>
-          ${s.mode !== 'browse' ? `<button ${on(() => resetPos({ seed: newSeed() }))} style="font-family:${T.label};font-size:13px;font-weight:600;padding:6px 12px;border-radius:999px;border:2px solid #2A2238;background:#FFFFFF;color:${T.pageInk};cursor:pointer">⇄ Shuffle</button>` : ''}
-          <button ${on(() => resetPos({ route: 'All', cpl: [], sys: [], ctrlOnly: false, boxedOnly: false, remsOnly: false, nioshOnly: false, missedOnly: false }))} style="font-family:${T.label};font-size:13px;background:none;border:none;color:${T.pageMuted};text-decoration:underline;cursor:pointer;padding:0">Clear filters</button>
+          ${s.mode !== 'browse' ? `<button ${on(() => resetPos({ seed: newSeed(), weakSnap: s.weak ? weakSnapshot(s.weak) : null }))} style="font-family:${T.label};font-size:13px;font-weight:600;padding:6px 12px;border-radius:999px;border:2px solid #2A2238;background:#FFFFFF;color:${T.pageInk};cursor:pointer">⇄ Shuffle</button>` : ''}
+          <button ${on(() => resetPos({ route: 'All', cpl: [], sys: [], ctrlOnly: false, boxedOnly: false, remsOnly: false, nioshOnly: false, weak: null, weakSnap: null }))} style="font-family:${T.label};font-size:13px;background:none;border:none;color:${T.pageMuted};text-decoration:underline;cursor:pointer;padding:0">Clear filters</button>
         </div>
       </div>
       ` : ''}
-    </section>`;
+    </section>`}`;
 
   if (dataStatus.note) {
     html += `<div role="status" style="font-family:${T.label};font-size:13px;color:${T.pageMuted};text-align:center">${esc(dataStatus.note)}</div>`;
   }
 
-  if (!dk.length && DRUGS.length) {
-    html += `<div style="padding:60px 20px;text-align:center;font-family:${T.head};font-size:22px;color:${T.pageMuted}">No cards match these filters.</div>`;
+  if (!dk.length && DRUGS.length && s.mode !== 'lists') {
+    const msg = s.weak ? 'No weak spots right now. Nice work!' : s.activeList && !(activeListObj().ids.length) ? 'This list is empty. Open “My lists” to add drugs.' : 'No cards match these filters.';
+    html += `<div style="padding:60px 20px;text-align:center;font-family:${T.head};font-size:22px;color:${T.pageMuted}">${msg}</div>`;
   }
 
-  // ---------- Flashcard (Flip & grade, Spaced review) ----------
+  // ---------- Flashcard (Flip & grade) ----------
   if (showFrontPicker && dk.length) {
     html += `<div style="display:flex;flex-direction:column;gap:18px;align-items:stretch;max-width:780px;width:100%;margin:0 auto">`;
-    if (srDone) {
-      html += `
-      <div style="padding:60px 24px;text-align:center;display:flex;flex-direction:column;gap:14px;align-items:center;border-radius:${T.cardRadius};border:${T.cardBorder};background:${T.panelBg}">
-        <div style="font-family:${T.head};font-size:28px;font-weight:700">Review session complete</div>
-        <div style="font-size:16px;color:${T.pageMuted}">Every card in this deck was rated Good or Easy.</div>
-        <button ${on(() => setState({ srQueue: null, flipped: false }))} style="font-family:${T.head};font-size:16px;font-weight:600;padding:12px 20px;border-radius:${T.btnRadius};border:${T.btnBorder};background:${T.primaryBg};color:${T.primaryFg};box-shadow:${T.btnShadow};cursor:pointer">Start again</button>
-      </div>`;
-    }
     if (cur) {
       const sy = SYS[cur.sys], fr = frontFor(cur, s.idx);
       html += `
@@ -587,16 +641,25 @@ function render() {
         </div>
       </div>
 
-      <div class="gradebar" style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between">
-        <div style="display:flex;gap:8px;align-items:center">
-          ${s.mode === 'flash' ? `
+      <div class="gradebar" style="display:flex;flex-direction:column;gap:10px">
+        ${s.flipped ? `
+        <div class="skillrow" style="display:flex;gap:6px;align-items:center;overflow-x:auto;white-space:nowrap;padding-bottom:2px">
+          ${lbl('Missed part?')}
+          ${activeSkills().map(k => {
+            const missed = s.skillMiss.includes(k), st = STATUS[skillStatus(cur.id, k)];
+            return `<button ${on(() => setState({ skillMiss: missed ? s.skillMiss.filter(x => x !== k) : [...s.skillMiss, k] }))} aria-pressed="${missed}" title="Currently: ${st.text}" style="flex:none;display:flex;align-items:center;gap:6px;font-family:${T.label};font-size:13px;font-weight:600;padding:6px 11px;border-radius:999px;border:2px solid ${missed ? '#B42318' : '#2A2238'};background:${missed ? '#B42318' : '#FFFFFF'};color:${missed ? '#FFFFFF' : T.pageInk};cursor:pointer"><span aria-hidden="true" style="width:9px;height:9px;border-radius:50%;background:${missed ? '#FFFFFF' : st.color}"></span>${missed ? '✗ ' : ''}${esc(SKILLS[k].label)}</button>`;
+          }).join('')}
+        </div>` : ''}
+        <div class="gradeline" style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between">
           <div style="display:flex;gap:8px;align-items:center">
-            ${[['←', -1, 'Previous card'], ['→', 1, 'Next card']].map(([ch, n, aria]) => `<button ${on(() => step(n))} aria-label="${aria}" class="arrow" style="font-family:${T.head};font-size:16px;font-weight:600;width:46px;height:46px;border-radius:${T.btnRadius};border:${T.btnBorder};background:${T.btnBg};color:${T.btnFg};box-shadow:${T.btnShadow};cursor:pointer">${ch}</button>`).join('')}
-          </div>` : ''}
-          <span class="gstatus" style="font-family:${T.label};font-size:14px;font-weight:600;color:${T.pageMuted}">${esc(statusLabel)}</span>
-        </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          ${gradeBtns.map(g => `<button class="gbtn" ${on(g.onClick)} style="display:flex;flex-direction:column;align-items:center;gap:1px;min-width:92px;font-family:${T.head};font-size:16px;font-weight:600;padding:10px 16px;border-radius:${T.btnRadius};border:${T.btnBorder};background:${g.bg};color:${g.fg};box-shadow:${T.btnShadow};cursor:pointer">${esc(g.label)}<span class="gsub" style="font-family:${T.label};font-size:11px;font-weight:600;opacity:.85">${esc(g.sub)}</span></button>`).join('')}
+            <div style="display:flex;gap:8px;align-items:center">
+              ${[['←', -1, 'Previous card'], ['→', 1, 'Next card']].map(([ch, n, aria]) => `<button ${on(() => step(n))} aria-label="${aria}" class="arrow" style="font-family:${T.head};font-size:16px;font-weight:600;width:46px;height:46px;border-radius:${T.btnRadius};border:${T.btnBorder};background:${T.btnBg};color:${T.btnFg};box-shadow:${T.btnShadow};cursor:pointer">${ch}</button>`).join('')}
+            </div>
+            <span class="gstatus" style="font-family:${T.label};font-size:14px;font-weight:600;color:${T.pageMuted}">${esc(statusLabel)}</span>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            ${gradeBtns.map(g => `<button class="gbtn" ${on(g.onClick)} style="display:flex;flex-direction:column;align-items:center;gap:1px;min-width:92px;font-family:${T.head};font-size:16px;font-weight:600;padding:10px 16px;border-radius:${T.btnRadius};border:${T.btnBorder};background:${g.bg};color:${g.fg};box-shadow:${T.btnShadow};cursor:pointer">${esc(g.label)}<span class="gsub" style="font-family:${T.label};font-size:11px;font-weight:600;opacity:.85">${esc(g.sub)}</span></button>`).join('')}
+          </div>
         </div>
       </div>`;
     }
@@ -614,7 +677,7 @@ function render() {
     <div style="max-width:780px;width:100%;margin:0 auto;display:flex;flex-direction:column;gap:16px">
       <div style="display:flex;flex-direction:column;border-radius:${T.cardRadius};border:${T.cardBorder};box-shadow:${T.cardShadow};background:${sy.soft};color:${T.ink};overflow:hidden">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:20px 24px 0;flex-wrap:wrap">
-          <span style="display:flex;gap:8px;align-items:center"><span style="font-family:${T.label};font-size:13px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:6px 12px;border-radius:999px;background:${sy.color};color:#FFFFFF;border:2px solid #2A2238">${esc(sy.label)}</span>${tierBadge(q.tier)}</span>
+          <span style="display:flex;gap:8px;align-items:center"><span style="font-family:${T.label};font-size:13px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:6px 12px;border-radius:999px;background:${sy.color};color:#FFFFFF;border:2px solid #2A2238">${esc(sy.label)}</span>${tierBadge(q.tier)}<span style="font-family:${T.label};font-size:12px;font-weight:700;color:${T.pageMuted}">${esc(SKILLS[q.skill].label)}</span></span>
           <span style="font-family:${T.label};font-size:14px;font-weight:700">Score ${q.score} / ${q.total}</span>
         </div>
         <div style="display:flex;flex-direction:column;gap:12px;padding:26px 28px 30px">
@@ -634,6 +697,12 @@ function render() {
     }
   }
 
+  // ---------- My progress ----------
+  if (s.mode === 'progress' && dk.length) html += progressHtml(dk);
+
+  // ---------- My lists ----------
+  if (s.mode === 'lists') html += listsHtml();
+
   // ---------- Browse ----------
   if (s.mode === 'browse' && dk.length) {
     html += `
@@ -652,9 +721,189 @@ function render() {
 
   html += `</div></div>`;
 
-  const searchFocused = document.activeElement && document.activeElement.id === 'search';
+  const focusedId = document.activeElement && ['search', 'lsearch', 'lname'].includes(document.activeElement.id) ? document.activeElement.id : null;
   document.getElementById('app').innerHTML = html;
-  if (searchFocused) { const el = document.getElementById('search'); el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
+  if (focusedId) { const el = document.getElementById(focusedId); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }
+}
+
+/* =====================================================================
+   7b. MY PROGRESS — how well each skill is known, for the cards currently selected
+   ===================================================================== */
+function progressHtml(dk) {
+  const act = activeSkills();
+  const tally = k => { const c = { solid: 0, learning: 0, weak: 0, new: 0 }; dk.forEach(d => c[skillStatus(d.id, k)]++); return c; };
+  const anyWeak = dk.filter(d => weakSkillsOf(d.id).length).length;
+  const tried = dk.filter(d => act.some(k => skillStatus(d.id, k) !== 'new'))
+    .sort((a, b) => weakSkillsOf(b.id).length - weakSkillsOf(a.id).length || a.generic.localeCompare(b.generic));
+  const btn = (label, onClick, primary, disabled) => `<button ${disabled ? 'disabled' : on(onClick)} style="font-family:${T.head};font-size:15px;font-weight:600;padding:9px 16px;border-radius:${T.btnRadius};border:${T.btnBorder};background:${primary ? T.primaryBg : T.btnBg};color:${primary ? T.primaryFg : T.btnFg};box-shadow:${disabled ? 'none' : T.btnShadow};cursor:${disabled ? 'default' : 'pointer'};opacity:${disabled ? .45 : 1}">${label}</button>`;
+  const rows = act.map(k => {
+    const c = tally(k), n = dk.length || 1;
+    const seg = st => c[st] ? `<span style="flex:${c[st]};background:${STATUS[st].color}" title="${STATUS[st].text}: ${c[st]}"></span>` : '';
+    return `
+    <div style="display:flex;flex-direction:column;gap:6px;padding:12px 14px;border-radius:${T.fieldRadius};background:#FFFFFF;border:2px solid #2A2238">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+        <span style="display:flex;gap:8px;align-items:center">${tierBadge(SKILLS[k].tier)}<span style="font-family:${T.head};font-size:17px;font-weight:700">${esc(SKILLS[k].label)}</span></span>
+        ${btn('Practise weak (' + c.weak + ')', () => resetPos({ mode: 'flash', weak: k, weakSnap: weakSnapshot(k) }), false, !c.weak)}
+      </div>
+      <div style="display:flex;height:14px;border-radius:999px;overflow:hidden;border:2px solid #2A2238;background:#ECE6DB">${seg('solid')}${seg('learning')}${seg('weak')}${c.new ? `<span style="flex:${c.new};background:#ECE6DB" title="Not tried: ${c.new}"></span>` : ''}</div>
+      <div style="font-family:${T.label};font-size:13px;color:${T.pageMuted}">${['solid', 'learning', 'weak', 'new'].map(st => `<span style="color:${STATUS[st].color};font-weight:700">${STATUS[st].glyph}</span> ${c[st]} ${STATUS[st].text.toLowerCase()}`).join(' &nbsp;·&nbsp; ')}</div>
+    </div>`;
+  }).join('');
+  const cols = `minmax(120px,1fr) repeat(${act.length}, 46px)`;
+  return `
+  <div style="max-width:780px;width:100%;margin:0 auto;display:flex;flex-direction:column;gap:16px">
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <div style="font-family:${T.head};font-size:22px;font-weight:700">My progress</div>
+      <div style="font-size:15px;line-height:1.5;color:${T.pageMuted}">Each skill is tracked separately for every drug, using your last few answers in Flip &amp; grade and the Quiz. <b>Solid</b> = right twice in a row, <b>Learning</b> = right last time, <b>Weak</b> = wrong last time. This covers the ${dk.length} cards currently selected (change the list or filters above to look at a different set).</div>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      ${btn('Study my weak spots (' + anyWeak + (anyWeak === 1 ? ' drug' : ' drugs') + ')', () => resetPos({ mode: 'flash', weak: 'any', weakSnap: weakSnapshot('any') }), true, !anyWeak)}
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px">${rows}</div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:${T.head};font-size:18px;font-weight:700">Drug by drug</div>
+      ${tried.length ? `
+      <div style="overflow-x:auto;border-radius:${T.fieldRadius};border:2px solid #2A2238;background:#FFFFFF">
+        <div style="display:grid;grid-template-columns:${cols};min-width:max-content;width:100%;align-items:center;font-size:14px">
+          <div style="padding:8px 12px;font-family:${T.label};font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:${T.pageMuted};border-bottom:2px solid #2A2238">Drug</div>
+          ${act.map(k => `<div title="${esc(SKILLS[k].label)}" style="padding:8px 2px;text-align:center;font-family:${T.label};font-size:11px;font-weight:700;color:${T.pageMuted};border-bottom:2px solid #2A2238">${esc(SKILLS[k].short)}</div>`).join('')}
+          ${tried.map(d => `
+          <div style="padding:8px 12px;font-weight:700;border-bottom:1px dashed #E3D9CC">${esc(d.generic)}</div>
+          ${act.map(k => { const st = STATUS[skillStatus(d.id, k)]; return `<div title="${esc(SKILLS[k].label)}: ${st.text}" style="padding:8px 2px;text-align:center;font-weight:800;color:${st.color};border-bottom:1px dashed #E3D9CC">${st.glyph}</div>`; }).join('')}`).join('')}
+        </div>
+      </div>
+      <div style="font-family:${T.label};font-size:12px;color:${T.pageMuted}">${['solid', 'learning', 'weak', 'new'].map(st => `<span style="color:${STATUS[st].color};font-weight:800">${STATUS[st].glyph}</span> ${STATUS[st].text}`).join(' &nbsp; ')}</div>` :
+      `<div style="padding:24px;text-align:center;color:${T.pageMuted};border-radius:${T.fieldRadius};border:2px dashed #E3D9CC">Nothing here yet. Grade some cards or answer some quiz questions and your results will show up.</div>`}
+    </div>
+    <div style="border-top:${T.divider};padding-top:12px">
+      <button ${on(() => { if (confirm('Erase all of your saved progress on this device? Your custom lists are not affected.')) { progress = {}; store.set('rxcards-skills', progress); resetPos({ weak: null, weakSnap: null }); } })} style="font-family:${T.label};font-size:13px;background:none;border:none;color:${T.pageMuted};text-decoration:underline;cursor:pointer;padding:0">Reset my progress</button>
+    </div>
+  </div>`;
+}
+
+/* =====================================================================
+   7c. MY LISTS — students build their own decks (e.g. everything on Exam 2)
+   ===================================================================== */
+const saveLists = () => { store.set('rxcards-lists', state.lists); store.set('rxcards-activelist', state.activeList); };
+const curList = () => state.lists.find(l => l.id === state.listEdit) || null;
+const listLabel = l => l.name + ' (' + l.ids.length + ')';
+function newList() {
+  const l = { id: 'l' + Date.now().toString(36), name: 'My list ' + (state.lists.length + 1), ids: [] };
+  state.lists.push(l);
+  Object.assign(state, { listEdit: l.id, lsearch: '', lonly: false, paste: '', pasteMsg: '' });
+  saveLists(); render();
+}
+function deleteList() {
+  const l = curList(); if (!l) return;
+  if (!confirm('Delete the list "' + l.name + '"? The drugs themselves are not affected.')) return;
+  state.lists = state.lists.filter(x => x.id !== l.id);
+  if (state.activeList === l.id) state.activeList = null;
+  state.listEdit = state.lists[0] ? state.lists[0].id : null;
+  saveLists(); resetPos();
+}
+function listShown() {
+  const l = curList(); if (!l) return [];
+  const q = state.lsearch.trim().toLowerCase(), has = new Set(l.ids);
+  return DRUGS.filter(d => (!state.lonly || has.has(d.id)) && (!q || [d.generic, d.brand, d.cls].join(' ').toLowerCase().includes(q)))
+    .sort((a, b) => a.generic.localeCompare(b.generic));
+}
+function toggleInList(id) {
+  const l = curList(); if (!l) return;
+  l.ids = l.ids.includes(id) ? l.ids.filter(x => x !== id) : [...l.ids, id];
+  saveLists(); refreshBuilder();
+}
+function bulkList(add) {
+  const l = curList(); if (!l) return;
+  const shown = listShown().map(d => d.id), set = new Set(l.ids);
+  shown.forEach(id => add ? set.add(id) : set.delete(id));
+  l.ids = [...set]; saveLists(); refreshBuilder();
+}
+// Turns pasted names ("lisinopril, Lipitor, metoprolol") into drugs from the deck.
+function addPasted() {
+  const l = curList(); if (!l) return;
+  const norm = t => String(t).toLowerCase().replace(/\(.*?\)/g, ' ').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+  const brands = d => String(d.brand).split(/[,;\/]/).map(norm).filter(Boolean);
+  const set = new Set(l.ids); let added = 0, already = 0; const notFound = [];
+  state.paste.split(/[\n,;]+/).map(t => t.trim()).filter(Boolean).forEach(tok => {
+    const n = norm(tok);
+    let hits = n.length < 3 ? [] : DRUGS.filter(d => norm(d.generic) === n || brands(d).includes(n));
+    if (!hits.length && n.length >= 3) hits = DRUGS.filter(d => (norm(d.generic) + ' ').startsWith(n + ' ') || brands(d).some(b => b.startsWith(n + ' ')));
+    if (!hits.length && n.length >= 4) hits = DRUGS.filter(d => (' ' + norm(d.generic) + ' ').includes(' ' + n + ' '));
+    if (!hits.length) { notFound.push(tok); return; }
+    hits.forEach(d => { if (set.has(d.id)) already++; else { set.add(d.id); added++; } });
+  });
+  l.ids = [...set]; saveLists();
+  state.pasteMsg = 'Added ' + added + (added === 1 ? ' drug' : ' drugs') + (already ? ' (' + already + ' already in the list)' : '') +
+    (notFound.length ? '. Could not find: ' + notFound.join(', ') + '. Try the generic name, or tick them below.' : '.');
+  state.paste = notFound.join('\n');
+  render();
+}
+function listGridHtml() {
+  const l = curList(); if (!l) return '';
+  const has = new Set(l.ids), rows = listShown();
+  if (!rows.length) return `<div style="grid-column:1/-1;padding:24px;text-align:center;color:${T.pageMuted}">No drugs match.</div>`;
+  return rows.map(d => {
+    const sy = SYS[d.sys], sel = has.has(d.id);
+    return `<button ${on(() => toggleInList(d.id))} aria-pressed="${sel}" style="display:flex;align-items:center;gap:10px;text-align:left;padding:10px 12px;border-radius:${T.fieldRadius};border:2px solid #2A2238;background:${sel ? sy.color : '#FFFFFF'};color:${sel ? '#FFFFFF' : T.ink};cursor:pointer;font-family:${T.body}">
+      <span aria-hidden="true" style="flex:none;display:grid;place-items:center;width:22px;height:22px;border-radius:6px;border:2px solid ${sel ? '#FFFFFF' : '#2A2238'};font-weight:800;font-size:14px">${sel ? '✓' : ''}</span>
+      <span style="display:flex;flex-direction:column;min-width:0"><span style="font-family:${T.head};font-size:16px;font-weight:600;line-height:1.15">${esc(d.generic)}</span>${d.brand ? `<span style="font-size:12px;opacity:.85">${esc(d.brand)}</span>` : ''}</span>
+    </button>`;
+  }).join('');
+}
+function refreshBuilder() {
+  const l = curList();
+  const g = document.getElementById('lgrid'); if (g) g.innerHTML = listGridHtml();
+  const c = document.getElementById('lcount'); if (c && l) c.textContent = l.ids.length + (l.ids.length === 1 ? ' drug' : ' drugs') + ' in this list';
+  const ch = l && document.getElementById('lchip-' + l.id); if (ch) ch.textContent = listLabel(l);
+}
+function listsHtml() {
+  const s = state, l = curList();
+  const small = (label, onClick, primary, extra = '') => `<button ${on(onClick)} style="font-family:${T.head};font-size:15px;font-weight:600;padding:9px 16px;border-radius:${T.btnRadius};border:${T.btnBorder};background:${primary ? T.primaryBg : T.btnBg};color:${primary ? T.primaryFg : T.btnFg};box-shadow:${T.btnShadow};cursor:pointer;${extra}">${label}</button>`;
+  let body;
+  if (!l) {
+    body = `<div style="padding:28px 22px;border-radius:${T.cardRadius};border:2px dashed #2A2238;background:#FFFFFF;display:flex;flex-direction:column;gap:12px;align-items:flex-start">
+      <div style="font-family:${T.head};font-size:20px;font-weight:700">Build your own deck</div>
+      <div style="font-size:15px;line-height:1.5;color:${T.pageMuted}">Have a quiz on a certain set of drugs? Make a list with just those drugs, then use Flip &amp; grade, the Quiz and My progress on only that list.</div>
+      ${small('+ Make my first list', newList, true)}
+    </div>`;
+  } else {
+    const n = l.ids.length;
+    body = `
+    <div style="display:flex;flex-direction:column;gap:12px;padding:16px 18px;border-radius:${T.panelRadius};background:${T.panelBg};border:${T.panelBorder}">
+      <label style="display:flex;flex-direction:column;gap:4px"><span style="font-family:${T.label};font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:${T.pageMuted}">List name</span>
+        <input id="lname" value="${esc(l.name)}" maxlength="60" style="font-family:${T.head};font-size:18px;font-weight:600;padding:10px 14px;border-radius:${T.btnRadius};border:${T.btnBorder};background:${T.btnBg};color:${T.btnFg};outline:none"></label>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <span id="lcount" style="font-family:${T.label};font-size:14px;font-weight:700">${n + (n === 1 ? ' drug' : ' drugs')} in this list</span>
+        <span style="flex:1"></span>
+        ${small('Study this list', () => { if (!l.ids.length) { state.pasteMsg = 'Add at least one drug first.'; render(); } else resetPos({ activeList: l.id, mode: 'flash' }); }, true)}
+        ${small('Delete list', deleteList, false, 'color:#B42318')}
+      </div>
+      ${s.pasteMsg ? `<div role="status" style="font-size:14px;color:${T.pageInk};background:#FFF1C9;border:2px solid #2A2238;border-radius:${T.fieldRadius};padding:8px 12px">${esc(s.pasteMsg)}</div>` : ''}
+      <div style="border-top:${T.divider}"></div>
+      <label style="display:flex;flex-direction:column;gap:6px"><span style="font-family:${T.head};font-size:16px;font-weight:700">Paste a list of names</span>
+        <span style="font-size:13px;color:${T.pageMuted}">Copy the drug names from your syllabus or study guide (one per line, or separated by commas). Brand or generic names both work.</span>
+        <textarea id="paste" rows="3" placeholder="lisinopril, Lipitor, metoprolol…" style="font-family:${T.body};font-size:15px;padding:10px 14px;border-radius:${T.btnRadius};border:${T.btnBorder};background:${T.btnBg};color:${T.btnFg};outline:none;resize:vertical">${esc(s.paste)}</textarea></label>
+      <div>${small('Add these to the list', addPasted, false)}</div>
+      <div style="border-top:${T.divider}"></div>
+      <div style="font-family:${T.head};font-size:16px;font-weight:700">Or tick drugs one by one</div>
+      <input id="lsearch" value="${esc(s.lsearch)}" placeholder="Search by name or class" aria-label="Search drugs to add" style="font-family:${T.body};font-size:16px;padding:12px 16px;border-radius:${T.btnRadius};border:${T.btnBorder};background:${T.btnBg};color:${T.btnFg};outline:none">
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        ${chipHtml(chip(s.lonly, () => setState({ lonly: !s.lonly }), 'Show only ticked'))}
+        ${chipHtml(chip(false, () => bulkList(true), 'Tick all shown'))}
+        ${chipHtml(chip(false, () => bulkList(false), 'Untick all shown'))}
+      </div>
+      <div id="lgrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,230px),1fr));gap:8px">${listGridHtml()}</div>
+    </div>`;
+  }
+  return `
+  <div style="max-width:900px;width:100%;margin:0 auto;display:flex;flex-direction:column;gap:14px">
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+      ${lbl('My lists')}
+      ${s.lists.map(x => chipHtml(chip(x.id === s.listEdit, () => setState({ listEdit: x.id, lsearch: '', lonly: false, paste: '', pasteMsg: '' }), listLabel(x), { id: 'lchip-' + x.id }))).join('')}
+      ${s.lists.length ? chipHtml(chip(false, newList, '+ New list')) : ''}
+    </div>
+    ${body}
+  </div>`;
 }
 
 function browseHtml(dk) {
@@ -673,7 +922,8 @@ function browseHtml(dk) {
     if (d.boxed) badges.push(badge('Boxed warning', true));
     if (d.rems) badges.push(badge('REMS', true));
     if (d.niosh) badges.push(badge('NIOSH', true));
-    if (s.missed.includes(d.id)) badges.push({ label: 'Missed', bg: '#B42318', fg: '#FFFFFF' });
+    const weak = weakSkillsOf(d.id);
+    if (weak.length) badges.push({ label: 'Weak: ' + weak.map(k => SKILLS[k].label).join(', '), bg: '#B42318', fg: '#FFFFFF' });
     return `
     <button ${on(() => setState({ mode: 'flash', idx: dk.indexOf(d), flipped: true }))} style="display:flex;flex-direction:column;gap:8px;text-align:left;padding:0;overflow:hidden;border-radius:${T.fieldRadiusLg};border:${T.cardBorder};background:#FFFFFF;color:${T.ink};box-shadow:${T.btnShadow};cursor:pointer;font-family:${T.body}">
       <div style="height:8px;width:100%;background:${sy.color}"></div>
@@ -700,19 +950,27 @@ app.addEventListener('click', e => {
   if (el && handlers[el.dataset.h]) handlers[el.dataset.h]();
 });
 app.addEventListener('input', e => {
-  if (e.target.id !== 'search') return;
-  state.search = e.target.value;
-  // Only redraw the results so the search box keeps its cursor.
-  document.getElementById('browse-grid').innerHTML = browseHtml(deck());
+  const id = e.target.id;
+  if (id === 'search') {
+    state.search = e.target.value;
+    // Only redraw the results so the search box keeps its cursor.
+    document.getElementById('browse-grid').innerHTML = browseHtml(deck());
+  } else if (id === 'lsearch') {
+    state.lsearch = e.target.value; refreshBuilder();
+  } else if (id === 'paste') {
+    state.paste = e.target.value;
+  } else if (id === 'lname') {
+    const l = curList(); if (l) { l.name = e.target.value.trim() || 'My list'; saveLists(); refreshBuilder(); }
+  }
 });
 window.addEventListener('keydown', e => {
   if (e.target && /INPUT|TEXTAREA/.test(e.target.tagName)) return;
   const { mode } = state;
-  if (mode !== 'flash' && mode !== 'sr') return;
+  if (mode !== 'flash') return;
   if (e.code === 'Space') { e.preventDefault(); flip(); }
   if (state.flipped && ['1', '2', '3'].includes(e.key) && hasTier(+e.key)) setState({ backTier: +e.key });
-  if (mode === 'flash' && e.key === 'ArrowRight') step(1);
-  if (mode === 'flash' && e.key === 'ArrowLeft') step(-1);
+  if (e.key === 'ArrowRight') step(1);
+  if (e.key === 'ArrowLeft') step(-1);
 });
 
 render();

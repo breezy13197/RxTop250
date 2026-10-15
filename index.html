@@ -73,6 +73,7 @@ const COLS = {
   controlledsubstance: 'ctrl', cpl: 'cpl', fdaindication1: 'ind1', fdaindication2: 'ind2',
   mechanismofaction: 'moa', dosageforms: 'forms', monitoring: 'mon',
   boxedwarning: 'boxed', contraindications: 'contra', adverseeffects: 'ae', patientcounseling: 'coun',
+  rems: 'rems', nioshhazardousdrug: 'niosh', niosh: 'niosh',
   facultyreviewed: 'reviewed',
 };
 const normHead = h => String(h).toLowerCase().replace(/\(.*?\)/g, '').replace(/[^a-z0-9]/g, '');
@@ -104,6 +105,7 @@ function buildDrugs(head, rows) {
       moa: get('moa'), forms: get('forms'), mon: get('mon'),
       boxed: /^(none|n\/a|-)?$/i.test(get('boxed')) ? '' : get('boxed'),
       contra: get('contra'), ae: get('ae'), coun: get('coun'),
+      rems: get('rems'), niosh: get('niosh'),
       reviewed: /^y/i.test(get('reviewed')),
     });
   }
@@ -191,7 +193,7 @@ const state = {
   mode: 'flash',
   tiers: Array.isArray(savedTiers) && savedTiers.length ? savedTiers.filter(t => TIERS[t]) : [1, 2, 3],
   front: store.get('rxcards-front', 'Generic'),
-  route: 'All', cpl: [], sys: [], ctrlOnly: false, boxedOnly: false, missedOnly: false,
+  route: 'All', cpl: [], sys: [], ctrlOnly: false, boxedOnly: false, remsOnly: false, nioshOnly: false, missedOnly: false,
   idx: 0, flipped: false, missed: store.get('rxcards-missed', []), srQueue: null, search: '',
   qn: 0, picked: null, score: 0, total: 0,
   seed: newSeed(),   // card order is shuffled with this; the Shuffle button makes a new one
@@ -215,6 +217,8 @@ function deck() {
     (!s.sys.length || s.sys.includes(d.sys)) &&
     (!s.ctrlOnly || d.controlled) &&
     (!s.boxedOnly || !!d.boxed) &&
+    (!s.remsOnly || !!d.rems) &&
+    (!s.nioshOnly || !!d.niosh) &&
     (!s.missedOnly || s.missed.includes(d.id)))
     .sort((a, b) => hash(a.id + s.seed) - hash(b.id + s.seed));
 }
@@ -271,6 +275,8 @@ function backSections(d) {
     { label: 'Monitoring', text: d.mon },
   ].filter(f => f.text) });
   if (hasTier(3)) sections.push({ tier: 3, boxed: d.boxed, fields: [
+    { label: 'REMS program', text: d.rems },
+    { label: 'NIOSH hazardous drug', text: d.niosh },
     { label: 'Contraindications', text: d.contra },
     { label: 'Adverse effects', text: d.ae },
     { label: 'Patient counseling', text: d.coun },
@@ -420,6 +426,8 @@ function cardBack(d, sy) {
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">
         ${d.cpl ? `<span style="font-family:${T.label};font-size:12px;font-weight:700;padding:5px 10px;border-radius:999px;background:#FFFFFF;color:#2A2238;border:2px solid #2A2238">${esc(d.cpl)}</span>` : ''}
         ${hasTier(1) && d.controlled ? `<span style="font-family:${T.label};font-size:12px;font-weight:700;padding:5px 10px;border-radius:999px;background:#111111;color:#FFFFFF;border:2px solid #2A2238">${esc(d.ctrl)}</span>` : ''}
+        ${hasTier(3) && d.rems ? `<span style="font-family:${T.label};font-size:12px;font-weight:700;padding:5px 10px;border-radius:999px;background:#FFFFFF;color:#B42318;border:2px solid #B42318">REMS</span>` : ''}
+        ${hasTier(3) && d.niosh ? `<span style="font-family:${T.label};font-size:12px;font-weight:700;padding:5px 10px;border-radius:999px;background:#FFFFFF;color:#B42318;border:2px solid #B42318">NIOSH</span>` : ''}
         ${draft ? `<span style="font-family:${T.label};font-size:12px;font-weight:700;padding:5px 10px;border-radius:999px;background:#FFE8A3;color:#5C3D00;border:2px solid #2A2238">Draft · not yet faculty reviewed</span>` : ''}
       </div>
     </div>
@@ -515,6 +523,8 @@ function render() {
         <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
           ${chipHtml(chip(s.ctrlOnly, () => resetPos({ ctrlOnly: !s.ctrlOnly }), 'Controlled only'))}
           ${chipHtml(chip(s.boxedOnly, () => resetPos({ boxedOnly: !s.boxedOnly }), 'Boxed warning'))}
+          ${chipHtml(chip(s.remsOnly, () => resetPos({ remsOnly: !s.remsOnly }), 'REMS'))}
+          ${chipHtml(chip(s.nioshOnly, () => resetPos({ nioshOnly: !s.nioshOnly }), 'NIOSH hazardous'))}
           ${chipHtml(chip(s.missedOnly, () => resetPos({ missedOnly: !s.missedOnly }), 'My missed (' + s.missed.length + ')'))}
         </div>
       </div>
@@ -531,7 +541,7 @@ function render() {
         <div style="display:flex;gap:12px;align-items:center;margin-left:auto">
           <span style="font-family:${T.label};font-size:14px;font-weight:700">${dk.length + (dk.length === 1 ? ' card' : ' cards')}</span>
           ${s.mode !== 'browse' ? `<button ${on(() => resetPos({ seed: newSeed() }))} style="font-family:${T.label};font-size:13px;font-weight:600;padding:6px 12px;border-radius:999px;border:2px solid #2A2238;background:#FFFFFF;color:${T.pageInk};cursor:pointer">⇄ Shuffle</button>` : ''}
-          <button ${on(() => resetPos({ route: 'All', cpl: [], sys: [], ctrlOnly: false, boxedOnly: false, missedOnly: false }))} style="font-family:${T.label};font-size:13px;background:none;border:none;color:${T.pageMuted};text-decoration:underline;cursor:pointer;padding:0">Clear filters</button>
+          <button ${on(() => resetPos({ route: 'All', cpl: [], sys: [], ctrlOnly: false, boxedOnly: false, remsOnly: false, nioshOnly: false, missedOnly: false }))} style="font-family:${T.label};font-size:13px;background:none;border:none;color:${T.pageMuted};text-decoration:underline;cursor:pointer;padding:0">Clear filters</button>
         </div>
       </div>
       ` : ''}
@@ -661,6 +671,8 @@ function browseHtml(dk) {
     if (d.route) badges.push(badge(d.route));
     if (d.controlled) badges.push(badge(d.ctrl, true));
     if (d.boxed) badges.push(badge('Boxed warning', true));
+    if (d.rems) badges.push(badge('REMS', true));
+    if (d.niosh) badges.push(badge('NIOSH', true));
     if (s.missed.includes(d.id)) badges.push({ label: 'Missed', bg: '#B42318', fg: '#FFFFFF' });
     return `
     <button ${on(() => setState({ mode: 'flash', idx: dk.indexOf(d), flipped: true }))} style="display:flex;flex-direction:column;gap:8px;text-align:left;padding:0;overflow:hidden;border-radius:${T.fieldRadiusLg};border:${T.cardBorder};background:#FFFFFF;color:${T.ink};box-shadow:${T.btnShadow};cursor:pointer;font-family:${T.body}">

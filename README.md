@@ -41,7 +41,7 @@ Until step 3 is done, the app shows the saved copy and a note saying the live sh
 |---|---|---|
 | **Tier 1 · Basics** | Brand/Generic, therapeutic class, FDA indication(s), controlled substance classification | Purple |
 | **Tier 2 · Pharmacology** | Mechanism of action, dosage forms, monitoring | Teal |
-| **Tier 3 · Safety & counseling** | Boxed warning, contraindications, adverse effects, patient counseling | Red |
+| **Tier 3 · Safety & counseling** | Boxed warning, contraindications, adverse effects, patient counseling, REMS program, NIOSH hazardous-drug listing | Red |
 
 Students switch each tier on or off with the **Study** buttons at the top of the app. Any combination works, but at least one tier must stay on.
 - The back of each card shows only the tiers that are switched on. When more than one tier is on, tabs at the top of the card back switch between them, so the card stays short (on a computer, the keys 1, 2 and 3 do the same).
@@ -49,6 +49,7 @@ Students switch each tier on or off with the **Study** buttons at the top of the
   - *Information → drug:* "Which drug carries this boxed warning?"
   - *Drug → information:* "Lisinopril: what is its boxed warning?" (also mechanism, monitoring, dosage forms, contraindications, adverse effects and counseling).
   - Wrong answers come from drugs in a different class, with clearly different wording, so they can't also be correct. Where possible they come from the same body system, so they look believable.
+- **REMS and NIOSH flags** (Tier 3): drugs on the FDA's REMS list (10 drugs) or the NIOSH List of Hazardous Drugs (26 drugs) show a red **REMS** and/or **NIOSH** tag on the card back and in Browse, plus a line naming the program or NIOSH table. The filter panel has **REMS** and **NIOSH hazardous** buttons that limit the cards to those drugs. *Background:* REMS (Risk Evaluation and Mitigation Strategy) is an FDA safety program for drugs with serious risks; NIOSH's list names drugs that need special handling precautions for the people who prepare and give them.
 - The generic and brand name always appear at the top of the card back, because they are the answer to the card.
 
 ---
@@ -61,6 +62,7 @@ Everything is done in the Google Sheet. The sheet's first tab, **"How to edit"**
 - **Mark a drug as reviewed:** set **Faculty Reviewed** to **Yes**. Until then, cards show a yellow **"Draft · not yet faculty reviewed"** label whenever Tier 2 or Tier 3 is switched on.
 - **Add a drug:** type it in the first empty row at the bottom. Only **Generic** is required.
 - **Remove a drug:** right-click the row number and choose **Delete row**.
+- **REMS / NIOSH columns:** type the program name or NIOSH table (for example "Opioid Analgesic REMS" or "Table 1") when a drug is on that list. Leave the cell blank if it isn't; any text in the cell turns the tag and filter on.
 - **Dropdown columns:** Body System, Route, Controlled Substance, CPL and Faculty Reviewed have dropdown menus, so the values always match what the app expects.
 
 **Rules that keep the app working:**
@@ -81,6 +83,11 @@ Everything is done in the Google Sheet. The sheet's first tab, **"How to edit"**
 - **Tier 1** comes from your *Sigler's Top 250 Oral and Parenteral Drugs* spreadsheet.
 - **Tier 2 and Tier 3** were drafted by AI from the *Top250_Tier2_Tier3_DRAFT* spreadsheet, which held full FDA label sections from openFDA/DailyMed. Each section was condensed to 1–3 sentences suited to a flashcard. Where the matched label covered only one product (for example a single tablet strength), dosage forms were written for the drug as a whole from general drug knowledge.
 - **All 249 drugs are marked "Faculty Reviewed = No".** Every Tier 2 and Tier 3 entry needs a faculty check before it is relied on for teaching or exams.
+
+**REMS and NIOSH columns:** matched from the REMS list and NIOSH hazardous-drug list you supplied, against the 249 drugs by name and ingredient (reviewed by hand). Notes:
+- *REMS (10):* eight opioid analgesics (Opioid Analgesic REMS), plus **olanzapine** (Zyprexa Relprevv long-acting injection only) and **testosterone** (Aveed injection only). The cell says when only one product is covered.
+- *NIOSH (26):* Tables 1 and 2. Oral contraceptives and similar products are flagged because NIOSH lists estrogen/progesterone combinations. **Ziprasidone** was inferred because its name was lost in the file conversion, so please confirm it.
+- Not flagged: products on the lists whose drug in Sigler's isn't the listed form (e.g. injectable-only listings, naloxone, celecoxib, ibuprofen, topiramate/Qsymia, promethazine-codeine).
 
 Changes made to the source data:
 - Spelling fixed: "Quetiapine Fumerate" → Fumarate, "Zolendronic" → Zoledronic, "Antiprakinson" → Antiparkinson, "Andrenergic" → Adrenergic.

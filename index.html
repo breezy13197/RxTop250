@@ -38,6 +38,7 @@ button{-webkit-tap-highlight-color:transparent}
    ===================================================================== */
 const SHEET_ID = '1MGGz9hqHF-PTv-Z35NzGfuIi7Hp5WAvj5cSWiv6emis';
 const SHEET_TAB = 'Drugs';
+const SHEET_LISTS_URL = 'https://docs.google.com/spreadsheets/d/' + SHEET_ID + '/gviz/tq?tqx=out:csv&headers=1&sheet=Lists';
 const SHEET_EDIT_URL = 'https://docs.google.com/spreadsheets/d/' + SHEET_ID + '/edit';
 const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/' + SHEET_ID + '/gviz/tq?tqx=out:csv&headers=1&sheet=' + encodeURIComponent(SHEET_TAB);
 
@@ -134,6 +135,7 @@ function parseCSV(text) {
 }
 
 let DRUGS = [];
+let COURSE_LISTS = [];   // read-only lists from the faculty Sheet's "Lists" tab
 let dataStatus = { source: 'backup', note: '' };
 try {
   DRUGS = buildDrugs(window.RX_BACKUP.head, window.RX_BACKUP.rows);
@@ -157,6 +159,14 @@ async function loadLiveData() {
       note: DRUGS.length ? 'Showing the saved copy of the drug data from ' + snap + ' (the live Google Sheet could not be reached).'
                          : 'Could not load the drug data. Check your internet connection and refresh.' };
   }
+  // Faculty course lists (a separate tab; a failure here never affects the drugs)
+  try {
+    const res = await fetch(SHEET_LISTS_URL, { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    COURSE_LISTS = buildCourseLists(parseCSV(await res.text()));
+    store.set('rxcards-courselists', COURSE_LISTS);
+  } catch (e) { /* keep the copy saved from the last visit */ }
+  if (state.activeList && !activeListObj()) state.activeList = null;
   render();
 }
 
@@ -235,7 +245,8 @@ const state = {
   backTier: null,    // which tier tab is open on the back of the card
   panelOpen: window.innerWidth >= 700,   // settings panel starts folded on phones
 };
-if (!state.lists.some(l => l.id === state.activeList)) state.activeList = null;
+COURSE_LISTS = (() => { const v = store.get('rxcards-courselists', []); return Array.isArray(v) ? v.filter(l => l && l.id && Array.isArray(l.ids)) : []; })();
+if (!state.lists.some(l => l.id === state.activeList) && !COURSE_LISTS.some(l => l.id === state.activeList)) state.activeList = null;
 state.listEdit = state.activeList || (state.lists[0] && state.lists[0].id) || null;
 if (!Array.isArray(state.tiers) || !state.tiers.length) state.tiers = [1, 2, 3];
 
@@ -269,8 +280,14 @@ function weakSnapshot(v) {
   DRUGS.forEach(d => { const w = weakSkillsOf(d.id).filter(k => v === 'any' || k === v); if (w.length) m[d.id] = w; });
   return m;
 }
+// Takes a drug out of the weak-spot set once none of its chosen skills are weak any more.
+function pruneSnap(id) {
+  const m = state.weakSnap; if (!m || !m[id]) return;
+  m[id] = m[id].filter(k => skillStatus(id, k) === 'weak');
+  if (!m[id].length) delete m[id];
+}
 const setWeak = v => resetPos({ weak: state.weak === v ? null : v, weakSnap: state.weak === v ? null : weakSnapshot(v) });
-const activeListObj = () => state.lists.find(l => l.id === state.activeList) || null;
+const activeListObj = () => state.lists.find(l => l.id === state.activeList) || COURSE_LISTS.find(l => l.id === state.activeList) || null;
 
 function deck(ignoreWeak) {
   const s = state, list = activeListObj(), inList = list ? new Set(list.ids) : null;
@@ -301,6 +318,8 @@ function flip() {
   state.flipped = !state.flipped;
   const el = document.getElementById('flipper');
   if (el) el.style.transform = state.flipped ? 'rotateY(180deg)' : 'rotateY(0deg)';
+  const row = document.getElementById('skillrow');   // the "Missed part?" chips follow the card
+  if (row) row.style.display = state.flipped ? 'flex' : 'none';
 }
 
 /* =====================================================================
@@ -420,7 +439,11 @@ function quiz(dk) {
     options, answered, score: s.score, total: s.total,
     feedback: !answered ? '' : s.picked === correct ? 'Correct.' : ty.reverse ? 'Not quite. The correct answer is shown in green.' : 'Answer: ' + correct,
     reveal: answered ? d.generic + (d.brand ? ' (' + d.brand + ')' : '') : '',
-    next: () => setState({ qn: (dk.indexOf(d) + 1), picked: null }),
+    next: () => {
+      pruneSnap(d.id);
+      const nd = deck(), i = nd.indexOf(d);
+      setState({ qn: i < 0 ? dk.indexOf(d) : i + 1, picked: null });   // if d left the set, its old slot is now the next drug
+    },
   };
 }
 
@@ -523,8 +546,12 @@ function render() {
   if (cur && s.mode === 'flash') {
     const some = s.skillMiss.length;
     const advance = () => {
-      // In weak-spot mode the set is fixed for the session, so a normal step is right.
-      step(1);
+      pruneSnap(cur.id);
+      if (s.weakSnap && !s.weakSnap[cur.id]) {
+        // The card just left the weak-spot set, so the next card has slid into its place.
+        const len = deck().length;
+        setState({ idx: len ? s.idx % len : 0, flipped: false, skillMiss: [] });
+      } else step(1);
     };
     gradeBtns = [
       { label: 'Missed it', sub: 'all of it', bg: '#B42318', fg: '#FFFFFF', onClick: () => { gradeCard(cur.id, 'all'); advance(); } },
@@ -564,6 +591,7 @@ function render() {
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
         ${lbl('My list')}
         ${chipHtml(chip(!s.activeList, () => resetPos({ activeList: null }), 'All drugs'))}
+        ${COURSE_LISTS.map(l => chipHtml(chip(s.activeList === l.id, () => resetPos({ activeList: l.id }), '★ ' + l.name + ' (' + l.ids.length + ')'))).join('')}
         ${s.lists.map(l => chipHtml(chip(s.activeList === l.id, () => resetPos({ activeList: l.id }), l.name + ' (' + l.ids.length + ')'))).join('')}
         ${chipHtml(chip(false, () => setState({ mode: 'lists', flipped: false }), s.lists.length ? '✎ Edit lists' : '+ Make a list'), '6px 12px')}
       </div>
@@ -642,14 +670,14 @@ function render() {
       </div>
 
       <div class="gradebar" style="display:flex;flex-direction:column;gap:10px">
-        ${s.flipped ? `
-        <div class="skillrow" style="display:flex;gap:6px;align-items:center;overflow-x:auto;white-space:nowrap;padding-bottom:2px">
+        ${`
+        <div id="skillrow" class="skillrow" style="display:${s.flipped ? 'flex' : 'none'};gap:6px;align-items:center;overflow-x:auto;white-space:nowrap;padding-bottom:2px">
           ${lbl('Missed part?')}
           ${activeSkills().map(k => {
             const missed = s.skillMiss.includes(k), st = STATUS[skillStatus(cur.id, k)];
             return `<button ${on(() => setState({ skillMiss: missed ? s.skillMiss.filter(x => x !== k) : [...s.skillMiss, k] }))} aria-pressed="${missed}" title="Currently: ${st.text}" style="flex:none;display:flex;align-items:center;gap:6px;font-family:${T.label};font-size:13px;font-weight:600;padding:6px 11px;border-radius:999px;border:2px solid ${missed ? '#B42318' : '#2A2238'};background:${missed ? '#B42318' : '#FFFFFF'};color:${missed ? '#FFFFFF' : T.pageInk};cursor:pointer"><span aria-hidden="true" style="width:9px;height:9px;border-radius:50%;background:${missed ? '#FFFFFF' : st.color}"></span>${missed ? '✗ ' : ''}${esc(SKILLS[k].label)}</button>`;
           }).join('')}
-        </div>` : ''}
+        </div>`}
         <div class="gradeline" style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between">
           <div style="display:flex;gap:8px;align-items:center">
             <div style="display:flex;gap:8px;align-items:center">
@@ -818,25 +846,53 @@ function bulkList(add) {
   shown.forEach(id => add ? set.add(id) : set.delete(id));
   l.ids = [...set]; saveLists(); refreshBuilder();
 }
-// Turns pasted names ("lisinopril, Lipitor, metoprolol") into drugs from the deck.
-function addPasted() {
-  const l = curList(); if (!l) return;
+// Finds drugs for typed names ("lisinopril", "Lipitor"): exact generic or brand, then names starting with it, then a whole word inside the name.
+function matchDrugNames(tokens) {
   const norm = t => String(t).toLowerCase().replace(/\(.*?\)/g, ' ').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
   const brands = d => String(d.brand).split(/[,;\/]/).map(norm).filter(Boolean);
-  const set = new Set(l.ids); let added = 0, already = 0; const notFound = [];
-  state.paste.split(/[\n,;]+/).map(t => t.trim()).filter(Boolean).forEach(tok => {
+  const ids = [], notFound = [];
+  tokens.forEach(tok => {
     const n = norm(tok);
     let hits = n.length < 3 ? [] : DRUGS.filter(d => norm(d.generic) === n || brands(d).includes(n));
     if (!hits.length && n.length >= 3) hits = DRUGS.filter(d => (norm(d.generic) + ' ').startsWith(n + ' ') || brands(d).some(b => b.startsWith(n + ' ')));
     if (!hits.length && n.length >= 4) hits = DRUGS.filter(d => (' ' + norm(d.generic) + ' ').includes(' ' + n + ' '));
-    if (!hits.length) { notFound.push(tok); return; }
-    hits.forEach(d => { if (set.has(d.id)) already++; else { set.add(d.id); added++; } });
+    if (!hits.length) notFound.push(tok); else hits.forEach(d => ids.push(d.id));
   });
+  return { ids, notFound };
+}
+function addPasted() {
+  const l = curList(); if (!l) return;
+  const { ids, notFound } = matchDrugNames(state.paste.split(/[\n,;]+/).map(t => t.trim()).filter(Boolean));
+  const set = new Set(l.ids); let added = 0, already = 0;
+  ids.forEach(id => { if (set.has(id)) already++; else { set.add(id); added++; } });
   l.ids = [...set]; saveLists();
   state.pasteMsg = 'Added ' + added + (added === 1 ? ' drug' : ' drugs') + (already ? ' (' + already + ' already in the list)' : '') +
     (notFound.length ? '. Could not find: ' + notFound.join(', ') + '. Try the generic name, or tick them below.' : '.');
   state.paste = notFound.join('\n');
   render();
+}
+// Lists written by faculty in the Sheet's "Lists" tab (columns: List Name, Drug).
+function buildCourseLists(rows) {
+  if (!rows.length) return [];
+  const head = rows[0].map(normHead), iName = head.indexOf('listname'), iDrug = head.indexOf('drug');
+  if (iName < 0 || iDrug < 0) return [];   // not the Lists tab (Google returns the first tab if the name is missing)
+  const byName = new Map();
+  rows.slice(1).forEach(r => {
+    const name = String(r[iName] || '').trim(), drug = String(r[iDrug] || '').trim();
+    if (!name || !drug) return;
+    const key = name.toLowerCase();
+    if (!byName.has(key)) byName.set(key, { name, drugs: [] });
+    byName.get(key).drugs.push(drug);
+  });
+  return [...byName.values()].map(l => ({ id: 'c-' + slug(l.name), name: l.name, course: true, ids: [...new Set(matchDrugNames(l.drugs).ids)] }))
+    .filter(l => l.ids.length);
+}
+function copyCourseList(id) {
+  const c = COURSE_LISTS.find(l => l.id === id); if (!c) return;
+  const l = { id: 'l' + Date.now().toString(36), name: c.name + ' (my copy)', ids: [...c.ids] };
+  state.lists.push(l);
+  Object.assign(state, { listEdit: l.id, lsearch: '', lonly: false, paste: '', pasteMsg: '' });
+  saveLists(); render();
 }
 function listGridHtml() {
   const l = curList(); if (!l) return '';
@@ -895,8 +951,18 @@ function listsHtml() {
       <div id="lgrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,230px),1fr));gap:8px">${listGridHtml()}</div>
     </div>`;
   }
+  const course = COURSE_LISTS.length ? `
+    <div style="display:flex;flex-direction:column;gap:8px;padding:14px 18px;border-radius:${T.panelRadius};background:#FFF1C9;border:${T.panelBorder}">
+      <div style="font-family:${T.head};font-size:17px;font-weight:700">★ Lists from your instructors</div>
+      ${COURSE_LISTS.map(c => `
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:space-between;padding-top:8px;border-top:${T.divider}">
+        <span style="font-family:${T.head};font-size:16px;font-weight:600">${esc(c.name)} <span style="font-family:${T.label};font-size:13px;font-weight:600;color:${T.pageMuted}">· ${c.ids.length} drugs</span></span>
+        <span style="display:flex;gap:8px;flex-wrap:wrap">${small('Study', () => resetPos({ activeList: c.id, mode: 'flash' }), true)}${small('Make my own copy', () => copyCourseList(c.id), false)}</span>
+      </div>`).join('')}
+    </div>` : '';
   return `
   <div style="max-width:900px;width:100%;margin:0 auto;display:flex;flex-direction:column;gap:14px">
+    ${course}
     <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
       ${lbl('My lists')}
       ${s.lists.map(x => chipHtml(chip(x.id === s.listEdit, () => setState({ listEdit: x.id, lsearch: '', lonly: false, paste: '', pasteMsg: '' }), listLabel(x), { id: 'lchip-' + x.id }))).join('')}

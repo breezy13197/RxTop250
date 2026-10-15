@@ -132,7 +132,7 @@ Instead of marking a whole card "missed", the app tracks **seven skills** for ev
 - **Quiz:** each question belongs to one skill. A right or wrong answer counts toward that skill only.
 - **Status:** each skill keeps your last four answers. ✓ **Solid** = right the last two times, ~ **Learning** = right last time, ✗ **Weak** = wrong last time, · **Not tried** = no answers yet.
 - **My progress page:** a bar for each skill, a drug-by-drug table, and **Practise weak** buttons. It covers whichever cards are currently selected (so choosing one of your lists shows progress for just that list).
-- **Weak spots filter** (in *Study settings & filters*): study only drugs you were weak in, either in any skill or one skill. In the Quiz, questions then focus on the weak skill. The set of cards is fixed when you pick the filter, so cards don't disappear as you improve; press **Shuffle** to rebuild it.
+- **Weak spots filter** (in *Study settings & filters*): study only drugs you were weak in, either in any skill or one skill. In the Quiz, questions then focus on the weak skill. As you clear a drug (so it is no longer weak), it drops out of the set; when the set is empty you'll see "No weak spots right now". Press **Shuffle** to rebuild the set from your current results.
 - **Spaced review was removed.** Weak-spot practice replaces it. Cards are not scheduled for future days.
 
 ## 9. My lists (custom decks)
@@ -144,6 +144,13 @@ For a quiz on a certain set of drugs, open **My lists**:
 
 Switch lists, or go back to all drugs, with the **My list** buttons in *Study settings & filters*. The other filters (route, tiers and so on) still apply on top of the list.
 
+**Lists from faculty (the "Lists" tab in the Google Sheet).** Faculty can give every student a ready-made deck, such as everything on Exam 2:
+1. Open the **Lists** tab of the Google Sheet.
+2. In column **List Name** type the list's name, and in column **Drug** pick or type one drug (a dropdown offers the generic names; brand names work too). Use one row per drug and repeat the list name on each row.
+3. Students see these lists marked with ★ under **My list** and in **My lists**. They can study them, or press **Make my own copy** to edit a copy.
+
+*Background:* the app reads this tab each time it opens, just like the Drugs tab, so changes appear without touching any code. To change a list, edit its rows; to remove one, delete all of its rows. Names are matched the same way as the paste box (so "metoprolol" adds both salts), and a name that can't be matched is skipped. Don't rename the tab or its headers. The sheet's **Notes** column is for faculty and is not shown to students.
+
 ## 10. What is saved in the browser
 
 Everything below is saved in the browser's own storage (called *localStorage*) on that device only. Nothing is sent anywhere and there are no accounts, so progress does not follow a student to another phone or computer.
@@ -153,6 +160,7 @@ Everything below is saved in the browser's own storage (called *localStorage*) o
 | `rxcards-skills` | Your last four answers for each skill of each drug |
 | `rxcards-lists` | Your custom lists (names and drugs) |
 | `rxcards-activelist` | Which list you were studying |
+| `rxcards-courselists` | A copy of the faculty lists from the last visit |
 | `rxcards-tiers` | Which tiers are switched on |
 | `rxcards-front` | Card-front setting (Generic, Brand, Clues, Random) |
 
